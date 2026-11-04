@@ -10,6 +10,8 @@ Include the affected version, Python and operating-system versions, expected and
 
 ## Scope and safe use
 
-The runtime reads local files or standard input and writes local reports. It does not implement active scanning, RF transmission, hardware collectors, or automatic remediation. A matched rule is an observation to investigate, not proof of an attack.
+The runtime reads selected local Windows Event Logs or JSONL input. Live monitoring stores bounded SQLite history and exposes a dashboard exclusively on IPv4 loopback (`127.0.0.1`). It does not support LAN/public deployment, active scanning, RF transmission, embedded hardware collectors, or automatic remediation. A matched rule is an observation to investigate, not proof of an attack.
 
-Outputs contain plaintext attributes as supplied. Choose access-controlled storage and redact data before sharing. The [security model](docs/security-model.md) explains trust boundaries and remaining limitations.
+The local dashboard has no account authentication or TLS and assumes a trusted workstation. Host/Origin checks and a session token protect browser boundaries; other local software/users may still access data. Do not forward its port or place it behind a public proxy.
+
+Databases, evidence, and exports contain plaintext telemetry. Windows collection selects limited fields, but account/service names and threat labels can still be sensitive. Choose access-controlled storage, keep real captures out of Git, and review exports before sharing. The [security model](docs/security-model.md) explains trust boundaries and remaining limitations.

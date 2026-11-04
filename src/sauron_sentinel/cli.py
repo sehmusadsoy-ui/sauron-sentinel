@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from contextlib import nullcontext
+from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 from typing import TextIO
@@ -93,6 +95,31 @@ def _execute(args: argparse.Namespace) -> dict:
     return summary
 
 
+def _collect_windows(args: argparse.Namespace) -> dict:
+    from .windows import collect_windows
+
+    if not 1 <= args.since_hours <= 168 or not 1 <= args.limit <= 1000:
+        raise ValidationError("since-hours must be 1..168 and limit 1..1000")
+    output = Path(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    batch = collect_windows(datetime.now(UTC) - timedelta(hours=args.since_hours), limit=args.limit)
+    with (output / "events.jsonl").open("x", encoding="utf-8", newline="\n") as stream:
+        for event in batch.events:
+            _write_json(stream, event.to_dict())
+    available = any(source["status"] == "ok" for source in batch.sources)
+    summary = {
+        "schema_version": 1,
+        "version": __version__,
+        "status": "complete" if available else "unavailable",
+        "events_processed": len(batch.events),
+        "synthetic_events": 0,
+        "sources": batch.sources,
+    }
+    with (output / "summary.json").open("x", encoding="utf-8", newline="\n") as stream:
+        _write_json(stream, summary)
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="sauron-sentinel",
@@ -112,9 +139,30 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--output", default="sentinel-output", help="New output directory")
             command.add_argument("--rules", type=Path, help="Custom v1 TOML rule file")
         command.add_argument("--max-events", type=_positive_limit, default=100_000)
+    live = commands.add_parser("serve", help="Open a local dashboard with real Windows logs")
+    live.add_argument("--data-dir", type=Path, default=Path("sentinel-data"))
+    live.add_argument("--port", type=int, default=8765)
+    live.add_argument("--interval", type=int, default=15)
+    live.add_argument("--lookback-hours", type=int, default=24)
+    live.add_argument("--open-browser", action="store_true")
+    windows = commands.add_parser("collect-windows", help="Export selected local Windows events")
+    windows.add_argument("--output", default="windows-output")
+    windows.add_argument("--since-hours", type=int, default=24)
+    windows.add_argument("--limit", type=int, default=200)
     args = parser.parse_args(argv)
     try:
-        summary = _execute(args)
+        if args.command == "serve":
+            from .live import serve
+
+            serve(args.data_dir, args.port, args.interval, args.lookback_hours, args.open_browser)
+            return 0
+        summary = _collect_windows(args) if args.command == "collect-windows" else _execute(args)
+    except sqlite3.Error:
+        print(
+            "sauron-sentinel: cannot access the local database; existing data was preserved",
+            file=sys.stderr,
+        )
+        return 2
     except (ValidationError, OSError) as exc:
         print(f"sauron-sentinel: {exc}", file=sys.stderr)
         return 2
@@ -122,4 +170,4 @@ def main(argv: list[str] | None = None) -> int:
         print("sauron-sentinel: interrupted", file=sys.stderr)
         return 130
     print(json.dumps(summary, indent=2, sort_keys=True))
-    return 0
+    return 3 if summary["status"] == "unavailable" else 0

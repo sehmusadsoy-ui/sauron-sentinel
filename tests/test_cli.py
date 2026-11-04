@@ -36,7 +36,7 @@ def test_demo_is_reproducible_and_explicitly_synthetic(tmp_path):
         assert result.returncode == 0, result.stderr
         summary = json.loads(result.stdout)
         assert summary["schema_version"] == 1
-        assert summary["version"] == "0.1.0"
+        assert summary["version"] == "0.2.0"
         assert summary["status"] == "complete"
         assert summary["events_processed"] > 0
         assert summary["synthetic_events"] == summary["events_processed"]
@@ -138,7 +138,7 @@ def test_help_and_version_are_available(tmp_path):
     assert command(tmp_path, "--help").returncode == 0
     result = command(tmp_path, "--version")
     assert result.returncode == 0
-    assert "0.1.0" in result.stdout
+    assert "0.2.0" in result.stdout
 
 
 def test_module_entrypoint_smoke(tmp_path):
@@ -151,7 +151,7 @@ def test_module_entrypoint_smoke(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.1.0"
+    assert result.stdout.strip() == "0.2.0"
 
 
 def test_excessive_toml_nesting_produces_no_cli_traceback(tmp_path):
@@ -179,3 +179,50 @@ def test_excessive_toml_nesting_produces_no_cli_traceback(tmp_path):
     assert result.returncode == 2
     assert "Traceback" not in result.stderr
     assert not output.exists()
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_collect_windows_exports_real_records_and_status(tmp_path, record, monkeypatch, available):
+    from sauron_sentinel import windows
+    from sauron_sentinel.models import normalize
+
+    event = normalize(record(synthetic=False))
+    status = "ok" if available else "unavailable"
+    monkeypatch.setattr(
+        windows,
+        "collect_windows",
+        lambda *_a, **_k: SimpleNamespace(
+            events=[event] if available else [],
+            sources=[{"channel": "System", "status": status, "event_count": int(available)}],
+        ),
+    )
+    output = tmp_path / "windows"
+    result = command(tmp_path, "collect-windows", "--output", output)
+    assert result.returncode == (0 if available else 3)
+    summary = json.loads(result.stdout)
+    assert summary["synthetic_events"] == 0
+    assert summary["sources"][0]["status"] == status
+    assert (output / "events.jsonl").exists()
+
+
+@pytest.mark.parametrize("flag,value", [("--limit", 0), ("--limit", 1001), ("--since-hours", 169)])
+def test_collect_windows_rejects_invalid_limits(tmp_path, flag, value):
+    result = command(tmp_path, "collect-windows", flag, value)
+    assert result.returncode == 2
+    assert not (tmp_path / "windows-output").exists()
+
+
+def test_serve_command_passes_settings_and_handles_stop(tmp_path, monkeypatch):
+    from sauron_sentinel import live
+
+    captured = []
+    monkeypatch.setattr(live, "serve", lambda *args: captured.append(args))
+    result = command(tmp_path, "serve", "--port", 8888, "--interval", 30, "--open-browser")
+    assert result.returncode == 0
+    assert captured[0][1:] == (8888, 30, 24, True)
+
+    def interrupt(*_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(live, "serve", interrupt)
+    assert command(tmp_path, "serve").returncode == 130

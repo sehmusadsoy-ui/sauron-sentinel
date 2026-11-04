@@ -43,6 +43,8 @@ Content identity is not a signature. Neither the hash nor the `source`, `device_
 
 ## Output files
 
+This section describes `run` and `demo` batch output. Live monitoring instead persists retained events, alerts, and evidence snapshots in `sentinel-data/sentinel.db`. `collect-windows` writes an event snapshot and a summary with per-channel availability.
+
 | File | Contents |
 | --- | --- |
 | `events.jsonl` | Accepted normalized telemetry records, one object per line |
@@ -61,3 +63,11 @@ The output directory must not already exist. A processing failure may leave part
 - Export only the attributes needed for the experiment. No automatic redaction is performed.
 - Set `synthetic=true` on simulations. Keep documentation fixtures separate from real lab captures.
 - Give each observation a distinct timestamp or distinct content when it represents a separate physical event; identical content is intentionally deduplicated within the bounded cache.
+
+## Windows source mapping
+
+The Windows collector emits `source=windows-eventlog`, a stable `windows-<16 hex characters>` device pseudonym, and `synthetic=false`. Attributes identify the original `channel`, `provider`, Windows `event_id`, and `record_id`. The top-level `event_id` remains Sentinel's normalized SHA-256 content identifier and is distinct from the numeric Windows event ID stored in attributes.
+
+Allowlisted context fields can include `user`, `target_user`, `logon_type`, `group_name`, `service_name`, `service_type`, `start_type`, `old_start_type`, and `threat_name`. Strings are capped to 256 characters with `fields_truncated=true` when applicable. Full raw XML and rendered event messages are not persisted. These limits reduce collection volume; selected values can still be sensitive.
+
+See [Windows monitoring](windows-monitoring.md) for selected event IDs, source status, and coverage limits.

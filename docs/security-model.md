@@ -2,37 +2,49 @@
 
 ## Intended environment
 
-The first release is a local tool for controlled experiments with telemetry the operator is authorized to process. It is not a hardened multi-tenant service or an evidence custody system. No process privileges beyond ordinary local file access should be necessary.
+The application runs on one trusted local workstation. It reads selected local Windows event logs with current-user permissions or analyzes JSONL the operator is authorized to process. It is not a hardened multi-user service, endpoint-protection product, or evidence custody system.
 
-## Assets and trust boundaries
+## Trust boundaries
 
-The principal assets are the operator's telemetry, prior run output, and confidence in how an alert was produced. JSONL records and TOML configuration are untrusted data. Producer labels and synthetic flags are claims rather than authenticated identities.
+Windows records, JSONL input, and TOML configuration are treated as data. The collector validates event channel/provider combinations and selects a small allowlist of useful fields rather than storing full rendered Windows messages or raw XML. Account/service names and threat labels may still be sensitive.
 
 | Risk | Implemented control | Remaining limitation |
 | --- | --- | --- |
-| Ambiguous or malformed input | Strict fields, scalar validation, duplicate-key and non-finite rejection | Malicious but valid data can still mislead a heuristic |
-| Resource exhaustion | Bounded line length, event count, rules, threshold evidence, groups, and deduplication | Use OS/process limits for hostile workloads; disk usage grows with accepted records |
-| Code execution through rules | Fixed comparison operators; no `eval`, shell actions, or plugins | Future adapters must preserve this boundary |
-| Overwriting prior evidence | A new output directory is required | An operator can still alter or delete files afterward |
-| Exposure through a service | No listener or automatic outbound upload | Files inherit the local machine's access controls |
-| Simulation contaminating live counts | Synthetic and real grouping separation | The producer can lie about the flag |
-| Replay inflation | Deterministic IDs and bounded duplicate suppression | Replays outside the cache or across runs are not globally suppressed |
-| Clock ambiguity | Explicit timezone required and out-of-order events rejected | Device clock correctness is not verified |
+| Ambiguous input | Strict schema, flat scalars, bounded strings, duplicate-key/non-finite rejection | Valid but misleading data can influence a heuristic |
+| Excess resource use | Bounded collector results, subprocess timeout, input sizes, rule state, and stored row counts | Use process/disk controls for adversarial workloads; bounded counts do not promise a fixed byte size |
+| Executable rule content | Fixed comparison operators; no `eval`, shell actions, or plugins | Future integrations must preserve the boundary |
+| Accidental privilege changes | No elevation, audit-policy edits, or security-setting changes | Some logs will remain unavailable to the current account |
+| Dashboard network exposure | Server fixed to `127.0.0.1`; no LAN/public-bind option | Loopback does not defend against hostile local software/users |
+| Cross-site browser requests | Host/Origin checks and a session token; locally bundled assets | No user-account authentication or multi-user isolation |
+| Overwritten batch evidence | New output directory required | Operators can still alter files afterward |
+| Synthetic/live mixing | Separate grouping; live SQLite storage rejects synthetic records | A producer's provenance flag is not a signature |
+| Duplicate collection | Content IDs and SQLite uniqueness for retained records | No unlimited deduplication guarantee beyond retention |
+| Time ambiguity | Explicit UTC normalization; late observations surfaced separately | Device/system clock correctness is not verified |
 
-## Privacy and output handling
+## Local data and retention
 
-Normalized records preserve accepted attribute values. Sentinel does not automatically redact usernames, addresses, identifiers, or secrets. Do not feed credentials or unnecessary personal data into a shared run. Output files are plaintext and have no application-managed encryption, signatures, or retention policy. Store them in a directory with suitable local access controls and remove them when no longer needed.
+The default database is `sentinel-data/sentinel.db`. Events, alerts, evidence snapshots, and exports are plaintext. There is no application-managed encryption, tamper seal, or evidentiary signing. Rely on suitable local file permissions and disk protection. Do not commit the database, run directories, or real captures to Git; `.gitignore` includes default data locations but cannot know every custom output path.
 
-The bundled demonstration is synthetic. It should be used for issue reports and reproducible examples in place of real captures.
+The Windows collector includes selected identity/context fields, capped to 256 characters, with truncation marked. It does not store full raw XML/messages. A hashed device label provides a stable local pseudonym, not a strong anonymity guarantee. Arbitrary batch JSONL may contain any allowed attribute strings, so minimize data at the producer and review exports before sharing.
+
+Default retention is 20,000 events and 2,000 alerts. Old rows are pruned and exports are bounded. This is monitoring history, not a complete Windows audit archive. Stop the application before relocating or deleting the data directory.
+
+## Permissions and collection honesty
+
+Sentinel does not request administrator access, create authentication failures, disable protection, or install test services. An accessible source with zero selected events is different from an inaccessible source. Both remain visible in source status. Missing audit policy is not silently repaired.
+
+The launcher can download Python build tools during initial installation. Routine monitoring makes no outbound telemetry upload or threat-intelligence request. Both the launcher and collector respect existing permissions without altering Windows audit or PowerShell execution policy.
 
 ## Detection limits
 
-An alert records a rule match, not a verified incident. No rule can establish RF attack intent or physical presence from these sample attributes alone. Severity is set by the rule author. There is no automatic remediation or active radio behavior.
+Alerts record rule matches, not verified incidents. A newly installed service, new account, group change, or unexpected shutdown can be legitimate. Defender observations represent the log's reported event; Sentinel is not an antivirus engine. RF and motion sample rules have no implemented hardware source and cannot establish attack intent.
 
-No empirical false-positive rate or detection accuracy is claimed. Such a claim would require labeled controlled captures and an evaluation protocol that this release does not include.
+Late events older than the current detection watermark are immediately retained but skipped for that live alert pass. Restart/recovery replay can later add historical alerts from retained records, including missing alerts after a stop between event and alert persistence. Existing alert IDs are not overwritten. Alert evidence is snapshotted before the current batch is pruned; events outside retained history cannot be recovered by replay.
+
+An unhealthy channel causes retries over the configured rolling lookback, while healthy polls use a 120-second overlap. Per-channel caps and limit flags still apply to every retry. Collector result caps, overlap limits, permissions, audit configuration, and retention can all limit coverage. No empirical detection accuracy or false-positive rate is claimed. Database errors do not trigger an automatic reset of existing local data.
 
 ## Supply chain
 
-The installed runtime has no third-party dependencies. Build and development tools are pinned at the top level in `pyproject.toml`; their transitive dependencies are not locked. GitHub Actions are pinned to full commit IDs, use read-only repository permissions, and do not retain checkout credentials. CI does not require user-supplied secrets or publish to a package registry.
+The runtime uses the Python standard library. Build/development tools are pinned at the top level in `pyproject.toml`; transitive tooling dependencies are not locked. Actions use full commit pins, read-only permissions, and no retained checkout credentials. CI needs no user-provided secrets and does not publish to a package registry.
 
 See [SECURITY.md](../SECURITY.md) for responsible reporting.

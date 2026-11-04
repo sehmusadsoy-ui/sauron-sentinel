@@ -8,8 +8,8 @@ from sauron_sentinel.rules import load_rules
 
 def test_bundled_rules_have_unique_identifiers():
     rules = load_rules()
-    assert len(rules) == 3
-    assert len({rule.id for rule in rules}) == 3
+    assert len(rules) == 10
+    assert len({rule.id for rule in rules}) == 10
 
 
 @pytest.mark.parametrize(

@@ -67,6 +67,14 @@ The synthetic flag is always included in the grouping boundary, even if omitted 
 - Evidence is bounded to the most recent `threshold` matching events. `matched_count` reports that retained evidence count.
 - Duplicate event IDs in the bounded deduplication cache do not contribute twice. The cache is not permanent and does not survive a new run.
 
+## Windows baseline rules
+
+The bundled rules also include `windows-service-installed`, `windows-log-cleared`, `windows-defender-threat`, `windows-defender-disabled`, `windows-account-created`, `windows-group-member-added`, and `windows-unexpected-shutdown`. Each matches one corresponding Windows event kind, has a threshold of one, and uses a zero-second cooldown. Severity is medium for service/account/group/shutdown observations and high for log-clearing/Defender threat/disable observations.
+
+These are investigation prompts. Legitimate service installation, administration, or an operational crash can trigger them. The existing `auth-failure-burst` rule considers repeated `auth.failure` records only when the Security source supplies them; inaccessible Security logs do not imply an absence of authentication failures.
+
+Live monitoring retains newly discovered out-of-order events in the timeline immediately, skips them during the current live alert pass, and reports a late-event count. Restart/recovery replay processes retained records chronologically and can therefore add historical alerts from late records. Existing alert IDs are preserved rather than overwritten. Batch analysis continues to reject out-of-order input. See the [architecture](architecture.md).
+
 ## Calibration
 
 The default rules are educational baselines. Authentication failures can be user error; strong RF observations can be normal transmitters; motion can be expected activity. Establish ground truth, compare against benign captures, measure false positives, and tune thresholds before relying on a rule operationally. Version the exact ruleset with each experiment.

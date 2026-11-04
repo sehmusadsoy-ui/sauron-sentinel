@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 — 2026-11-05
+
+- Added real read-only collection of selected Windows System, Security, and Defender events, with truthful per-channel availability and capped-result reporting.
+- Added a Turkish browser dashboard restricted to IPv4 loopback, local event/alert history, evidence inspection, and bounded export.
+- Added persistent SQLite storage with retention limits, retained-event deduplication, and restart reconstruction of detection state.
+- Added recovery of missing alerts from retained chronological events, evidence snapshots before batch pruning, and rolling-lookback retries for unhealthy sources.
+- Added Windows baseline rules and explicit handling of late observations without fabricating alerts.
+- Added one-time `collect-windows`, the `serve` command, and a Windows launcher with a project-local Python environment.
+- Kept synthetic demo data separate from real monitoring; embedded/RF hardware integrations remain future work.
+
 ## 0.1.0 — 2026-11-05
 
 Initial local telemetry and detection release.

@@ -1,39 +1,44 @@
 # Roadmap
 
-This document separates shipped behavior from proposals. Milestones are acceptance criteria, not commitments or compatibility claims.
+This document separates shipped behavior from proposals. Milestones are acceptance criteria, not compatibility claims or delivery commitments.
 
 ## 0.1 — Local telemetry foundation
 
-Implemented in this repository:
-
-- Streaming JSONL ingestion and strict, versioned normalization.
-- Deterministic event references and local evidence output.
+- Streaming JSONL ingestion, strict versioned normalization, and deterministic event references.
 - Declarative event-time detection with bounded state and cooldowns.
-- Synthetic demo data, automated tests, package build checks, and Windows/Linux CI.
+- Synthetic fixtures, tests, batch evidence output, and package/CI checks.
 
-## Next — Adapter contracts and controlled captures
+## 0.2 — Local Windows monitoring
 
-Proposed targets are RF Canvas, CSI Radar, and LabMate, involving Flipper Zero and ESP32 where applicable. No integration is complete.
+- Read-only, selected-event Windows collector with per-channel availability and bounded results.
+- Turkish loopback browser dashboard with a real event timeline and explainable alert evidence.
+- SQLite history, bounded retention, recollection deduplication, and restart/recovery replay that saves previously missing alerts.
+- Windows launcher with project-local setup and no automatic elevation or policy changes.
+- Permission, empty-source, cap, and late-event reporting; zero alerts remain an honest result.
 
-An adapter is ready only when it has:
+## Next — Hardware contracts and controlled captures
+
+RF Canvas, CSI Radar, and LabMate remain proposed targets involving Flipper Zero and ESP32 where applicable. None has a completed integration in this repository.
+
+A hardware adapter is ready only when it has:
 
 1. A documented export/transport protocol and supported firmware versions.
 2. Bounded framing, reconnect/error handling, and explicit device identity.
 3. Clock synchronization and a declared late-event policy.
-4. Attribute units, producer version, calibration metadata, and provenance rules.
-5. Controlled real captures labeled separately from synthetic fixtures.
-6. Integration tests using those captures and an end-to-end hardware validation procedure.
+4. Attribute units, calibration metadata, producer version, and provenance rules.
+5. Controlled real captures clearly separated from synthetic fixtures.
+6. Capture regression tests and an end-to-end hardware validation procedure.
 
-Passive acquisition should remain separate from detection. Any operation that can transmit, change device configuration, or interact with a network requires its own deliberate interface and authorization model.
+Keep passive acquisition separate from analysis. Any future operation that transmits, changes device configuration, or interacts with a network requires a deliberate interface and authorization model.
 
-## Later — Investigation and evaluation
+## Further investigation work
 
-- A local timeline viewer with event and alert filters, evidence navigation, and explicit partial-run status.
-- Reproducible labeled lab scenarios, false-positive analysis, and throughput measurements with disclosed hardware and inputs.
-- Durable deduplication and retention policies when the storage model needs them.
-- Cross-source correlation only after clock, device identity, and provenance contracts are validated.
-- Optional operating-system telemetry exporters with dedicated tests and documented platform support.
+- Broader, individually documented Windows event coverage and optional OS exporters.
+- Controlled labeled scenarios and false-positive analysis with disclosed inputs and evaluation conditions.
+- Explicit durable collector cursors/late-arrival handling beyond bounded overlapping queries.
+- Configurable retention/export policies and stronger evidence custody when required.
+- Cross-source correlation after clock, identity, and provenance contracts are validated.
 
-## Further research
+## Research
 
-Threat-intelligence enrichment, Sigma interoperability, statistical anomaly detection, and a dashboard may be useful future work. None is implemented or claimed by v0.1.0. They should be introduced only with clear data boundaries, repeatable validation, and a maintenance plan.
+Threat-intelligence enrichment, Sigma interoperability, learned anomaly detection, active response, and remote deployment are not implemented. Each requires clear boundaries, repeatable validation, and a maintenance plan before becoming a product capability.

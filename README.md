@@ -1,34 +1,66 @@
 # Sauron Sentinel
 
-**Local telemetry. Explainable detections. A foundation for an embedded security lab.**
+**See local Windows security telemetry. Inspect the evidence behind every alert.**
 
 [![CI](https://github.com/sehmusadsoy-ui/sauron-sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/sehmusadsoy-ui/sauron-sentinel/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Sauron Sentinel is a Python telemetry and detection engine for reproducible security experiments. It reads local JSON Lines records, validates and normalizes them into a common event model, then applies declarative rules with event-time windows and cooldowns. Every alert includes the rule, grouping values, and event IDs that explain it.
+Sauron Sentinel is a local security-monitoring application with a Turkish browser dashboard, a read-only Windows Event Log collector, persistent SQLite storage, and an explainable rule engine. It shows real observations from the current computer, source availability, and alerts backed by event evidence.
 
-Version **0.1.0 is an early, working CLI release**. It has no runtime dependencies, opens no network listener, and performs no active scanning or radio transmission. Its bundled demonstration is entirely synthetic.
+**Version 0.2.0 adds live Windows monitoring.** The JSONL analysis tools and explicitly synthetic demo remain available for reproducible experiments. The runtime uses the Python standard library; dashboard assets are bundled locally.
 
-RF Canvas, CSI Radar, and LabMate are **planned integration targets**. This repository does not implement or validate Flipper Zero/ESP32 firmware, serial collectors, RF capture, or CSI processing. Source labels in sample telemetry describe a proposed data contract; they do not establish hardware compatibility.
+RF Canvas, CSI Radar, and LabMate remain **future integration targets**. No Flipper Zero/ESP32 firmware, serial collector, RF capture, or CSI processing is implemented in this release.
 
-## What works today
+## Start on Windows
+
+Requires Python 3.11 or newer and Windows PowerShell. Download or clone the repository, then double-click **`start-sentinel.cmd`**.
+
+The launcher prepares a project-local `.venv` on first use, installs the application, starts monitoring, and opens [the local dashboard](http://127.0.0.1:8765/). Keep its terminal window open; press **Ctrl+C** to stop. Initial setup may download Python build tools. Later launches reuse the installed environment without running an installation when its version matches the checkout.
+
+You can also start it from PowerShell:
+
+```powershell
+.\Start-Sentinel.ps1
+```
+
+Choose another port or polling interval when needed:
+
+```powershell
+.\Start-Sentinel.ps1 -Port 8766 -Interval 30 -LookbackHours 24
+```
+
+The launcher does not request administrator access or change Windows audit or PowerShell execution policy. It respects the machine's existing script policy; the Python command below is also available directly. Use `-NoBrowser` to leave the browser closed, or `-Reinstall` to refresh the local installation after changing package files.
+
+## What the dashboard shows
+
+- Real, selected **System**, **Security**, and **Microsoft Defender** events, with timestamps and useful context.
+- Source health that distinguishes an accessible log with no matching events from a log that could not be read.
+- Local event and alert history retained in SQLite across restarts.
+- Rule matches with event references, rather than invented incidents or a simulated attack counter.
+
+The first poll looks back 24 hours by default; subsequent polls refresh the local view. The default polling interval is 15 seconds. System lifecycle records can provide useful real observations even when security-specific channels are unavailable. **Zero alerts is a valid result.** Sentinel does not generate test attacks or fabricate events to populate the dashboard.
+
+Healthy polls use a 120-second overlap. If any source is unavailable or fails, monitoring retries the configured rolling lookback until all sources are healthy, still subject to per-channel result caps. Late observations appear in the timeline immediately but are skipped by the current detection pass; chronological replay on restart or recovery can add historical alerts from retained records.
+
+Windows may restrict Security or Defender log access for the current account. Missing audit configuration, disabled channels, and an empty selected-event window can also affect results. Sentinel reports these conditions; it does not elevate itself or alter logging settings. See [Windows monitoring](docs/windows-monitoring.md).
+
+## Capabilities
 
 | Capability | Implementation |
 | --- | --- |
-| Collection | Bounded, streaming JSONL ingestion from a file or standard input |
-| Normalization | Explicit schema validation, timezone-aware UTC timestamps, deterministic event IDs |
-| Detection | TOML rules, typed comparisons, grouped threshold windows, cooldowns |
-| Evidence | Normalized event log, alert log, and run summary in a fresh local directory |
-| Reproducibility | Deterministic synthetic demo and automated regression tests |
-| Resource controls | Input-size and event-count limits, bounded deduplication and correlation state |
-| Delivery | Installable package, Windows/Linux CI, wheel and source-distribution checks |
+| Windows collection | Read-only, bounded `Get-WinEvent` queries for selected event IDs |
+| Browser dashboard | Turkish local interface bound to IPv4 loopback |
+| Persistence | Local SQLite event and alert history |
+| JSONL analysis | Streaming file/stdin ingestion with strict schema validation |
+| Normalization | UTC timestamps, explicit synthetic provenance, deterministic event IDs |
+| Detection | TOML rules, typed comparisons, grouped event-time thresholds, cooldowns |
+| Evidence | Alert references and evidence snapshots; JSONL batch exports |
+| Verification | Automated tests, Windows/Ubuntu CI, wheel and source-distribution checks |
 
-This is a heuristic analysis tool, not a calibrated intrusion detector or production SIEM. RF activity and motion observations alone do not prove an attack.
+This is an early heuristic monitoring tool, not a calibrated intrusion detector, endpoint protection replacement, or production SIEM. A matched rule is a reason to investigate, not proof of compromise.
 
-## Quick start
-
-Requires Python 3.11 or newer. Run these commands from a terminal:
+## Manual installation and commands
 
 ```sh
 git clone https://github.com/sehmusadsoy-ui/sauron-sentinel.git
@@ -36,91 +68,92 @@ cd sauron-sentinel
 python -m venv .venv
 ```
 
-Activate the environment:
-
-```sh
-# Linux / macOS
-source .venv/bin/activate
-```
-
-```powershell
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-```
-
-Install and run:
+Activate the environment with `.venv\Scripts\Activate.ps1` in Windows PowerShell or `source .venv/bin/activate` on Linux/macOS, then install:
 
 ```sh
 python -m pip install .
 sauron-sentinel --version
+```
+
+Start live monitoring on Windows:
+
+```sh
+sauron-sentinel serve --port 8765 --data-dir sentinel-data --interval 15 --lookback-hours 24 --open-browser
+```
+
+The dashboard listens only on `127.0.0.1`; LAN/public binding is not supported. Local history is stored under `sentinel-data`. Stop the process before moving or removing that directory. Keep its contents private and out of Git.
+
+Restart/recovery replay saves previously missing alert matches without overwriting existing alert records. This also recovers a stop between committing an event and saving its alert, as long as the event is retained. A database-access error is reported without automatically resetting the existing database.
+
+Collect a one-time Windows snapshot without starting the dashboard:
+
+```sh
+sauron-sentinel collect-windows --output windows-output --since-hours 24 --limit 200
+```
+
+Windows collection requires Windows; JSONL analysis and the synthetic demo also work on Linux/macOS. You can use `python -m sauron_sentinel` in place of `sauron-sentinel`.
+
+## Offline analysis and reproducible demo
+
+To verify the analysis pipeline with fixed synthetic observations:
+
+```sh
 sauron-sentinel demo --output demo-output
 ```
 
-The demonstration replays 12 fixed synthetic events through the same pipeline used by `run` and produces three alerts. Inspect `demo-output/events.jsonl`, `demo-output/alerts.jsonl`, and `demo-output/summary.json`. Choose a new output directory for each run; an existing directory is rejected to protect earlier evidence.
+The demo processes 12 synthetic events and produces three alerts. It uses the same normalization and rule engine as file analysis. Every demo event is labeled synthetic; it is separate from live Windows monitoring.
 
-You can also use `python -m sauron_sentinel` in place of `sauron-sentinel`.
-
-## Analyze your telemetry
-
-Start with records that follow the [event contract](docs/data-format.md). Use only telemetry you are authorized to process, and remove secrets before exporting it.
+Analyze JSONL records that follow the [event contract](docs/data-format.md):
 
 ```sh
 sauron-sentinel validate --input examples/telemetry.jsonl
 sauron-sentinel run --input examples/telemetry.jsonl --output sentinel-output
-```
-
-To receive JSONL from another local process, set `--input -`:
-
-```sh
-cat examples/telemetry.jsonl | sauron-sentinel run --input - --output stdin-output
-```
-
-PowerShell equivalent:
-
-```powershell
-Get-Content examples/telemetry.jsonl | sauron-sentinel run --input - --output stdin-output
-```
-
-Supply a custom rules file when needed:
-
-```sh
 sauron-sentinel run --input examples/telemetry.jsonl --rules examples/custom-rules.toml --output custom-output
 ```
 
-`validate` checks the event schema and input limits without writing files; it does not evaluate rules or check chronological ordering. `run` requires timestamps to be ordered across the entire stream. Offset timestamps are converted to UTC. Invalid records, out-of-order events, invalid rules, and exhausted resource limits stop the run with a nonzero exit status. See the summary and command error before treating output as complete.
+Batch analysis writes `events.jsonl`, `alerts.jsonl`, and `summary.json` into a new directory. An existing output directory is rejected to protect prior evidence. A failed run can leave partial files with `status=failed` in its summary.
 
-The default event limit is 100,000. Use `--max-events N` to choose a limit from 1 through 1,000,000; reaching an excess record causes an error rather than silent truncation. Commands print a JSON summary on success. Validation and processing errors return exit code `2`; interruption returns `130`.
+`validate` checks the schema and input limits without writing files; it does not evaluate rules or check chronological ordering. `run` requires timestamps in globally nondecreasing order. Both accept `--input -` for standard input. The default batch event limit is 100,000; `--max-events N` accepts 1–1,000,000 and fails on excess input instead of silently truncating it.
 
-## Detection examples
+## Detection and evidence
 
-The bundled rules illustrate three repeatable experiments:
+Rules operate on normalized events, maintain bounded per-group evidence, and use event time. Alerts identify their rule, severity, grouping values, and contributing event IDs. Synthetic and non-synthetic records cannot combine to meet a threshold.
 
-| Rule | Trigger | Interpretation |
-| --- | --- | --- |
-| `auth-failure-burst` | Five authentication failures for the same device and user in 60 seconds | Investigate repeated failures; this does not establish credential compromise |
-| `rf-activity-burst` | Three RF observations with RSSI at least −40 dBm in 10 seconds | Investigate a cluster of strong observations; this is not RF attack attribution |
-| `motion-without-maintenance` | Motion score at least 0.8 with `maintenance=false` | Review the observation and context; no physical-security guarantee |
+Windows baseline rules flag service installation, audit-log clearing, Defender threat/disable records, account creation, group membership changes, and unexpected shutdowns for investigation. These records can also reflect legitimate administration or operational faults. Authentication failures use a grouped threshold rather than declaring every failure an incident.
 
-Rules are intentionally small and transparent. They have no arbitrary Python expressions, shell actions, external lookups, or automatic remediation. Thresholds are demonstration values and require calibration against controlled real measurements.
+The original demonstration rules include repeated authentication failures, clusters of strong RF observations, and motion outside a declared maintenance period. RF and motion rules are schema demonstrations; they do not implement radio or CSI acquisition and cannot establish attack intent. Thresholds require calibration against labeled, authorized captures.
 
-See [rule semantics and configuration](docs/rules.md) for exact window, cooldown, and grouping behavior.
+See [rules](docs/rules.md) for exact comparison, window, grouping, and cooldown semantics.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Local JSONL file or stdin] --> B[Bounded collector]
-    B --> C[Strict normalization]
-    C --> D[Event-time rule engine]
-    C --> E[events.jsonl]
-    D --> F[alerts.jsonl]
-    D --> G[summary.json]
-    H[RF Canvas · CSI Radar · LabMate<br/>Future adapters] -. proposed event contract .-> A
+    W[Windows Event Logs] --> C[Read-only bounded collector]
+    J[Local JSONL or stdin] --> N[Strict normalization]
+    C --> N
+    N --> R[Explainable rule engine]
+    N --> S[Local SQLite history]
+    R --> S
+    S --> H[Loopback HTTP server]
+    H --> D[Turkish browser dashboard]
+    N --> E[Batch JSONL evidence]
+    F[RF Canvas · CSI Radar · LabMate<br/>Future adapters] -. proposed contract .-> N
 ```
 
-The boundary between collection and normalization allows a future adapter to export the same event schema without changing detection logic. Hardware authentication, clock synchronization, transport framing, and field validation still need to be designed and tested before live use.
+Read the [architecture](docs/architecture.md), [Windows collector guide](docs/windows-monitoring.md), [event contract](docs/data-format.md), and [security model](docs/security-model.md).
 
-Read the [architecture](docs/architecture.md), [data format](docs/data-format.md), and [security model](docs/security-model.md) for operational details.
+## Privacy and operational limits
+
+- Runtime monitoring stays on the local machine. It performs no active scanning, radio transmission, automatic response, or telemetry upload.
+- The local dashboard has no user-account system or TLS. Loopback binding is a deployment boundary, not protection against other software or users already on the computer.
+- Events can contain account names, service names, threat labels, and other sensitive context. Local database and export files are plaintext; review data before sharing it.
+- Selected event IDs and per-channel result limits mean collection is not a complete Windows audit archive. Source status flags possible capped results.
+- Missing permissions and missing logs remain visible limitations. The application does not grant itself access, change audit policy, or manufacture replacement data.
+- There are no validated RF Canvas, CSI Radar, LabMate, Flipper Zero, or ESP32 integrations.
+- No learned anomaly model, threat-intelligence feed, Sigma compatibility, or remediation system is included.
+
+See the [roadmap](docs/roadmap.md) for the remaining stages.
 
 ## Development and verification
 
@@ -132,23 +165,8 @@ python -m pytest --cov --cov-report=term-missing
 python -m build
 ```
 
-CI runs the tests on Windows and Ubuntu with Python 3.11 and 3.14, enforces branch coverage, and smoke-tests a wheel installed into a clean environment. Coverage describes exercised code; it is not a measure of real-world detection accuracy.
+CI tests Windows and Ubuntu with Python 3.11 and 3.14, enforces branch coverage, and smoke-tests an installed wheel. Host-specific collection tests use synthetic operating-system responses; a live smoke check separately verifies the current computer's accessible channels. Coverage is not a real-world detection-accuracy metric.
 
-Runtime code uses the Python standard library. Development tools and the build backend are pinned in `pyproject.toml`; transitive tooling dependencies are resolved by pip. GitHub Actions use full commit pins and read-only repository permissions. Dependabot proposes dependency updates.
+Runtime code uses the standard library. Build and development tools are pinned at the top level in `pyproject.toml`; pip resolves their transitive dependencies. Actions use full commit pins and read-only permissions. Dependabot proposes updates.
 
-## Limits and next stages
-
-- No live hardware collectors, GUI/dashboard, service, cross-device clock correction, or network API.
-- No learned anomaly model, threat-intelligence feed, Sigma compatibility, or automatic response.
-- Correlation state and duplicate tracking are in memory and reset on each run. The default engine limits are 4,096 active rule groups, 100,000 evidence entries, and 10,000 cached event IDs.
-- Duplicate suppression is bounded; replaying an event after its ID leaves the cache can count it again.
-- Synthetic and non-synthetic events are always kept in separate rule groups. The `synthetic` flag is supplied by the producer and is not cryptographic provenance.
-- Outputs contain telemetry attributes as provided. They are not encrypted, signed, anonymized, or automatically redacted.
-
-The [roadmap](docs/roadmap.md) defines acceptance criteria for real adapters, timeline exploration, and controlled lab validation. No hardware stage is marked complete.
-
-## Contributing and security
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions and [SECURITY.md](SECURITY.md) for reporting a vulnerability without publishing sensitive data.
-
-Released under the [MIT License](LICENSE). A Sauron Lab project.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Released under the [MIT License](LICENSE). A Sauron Lab project.

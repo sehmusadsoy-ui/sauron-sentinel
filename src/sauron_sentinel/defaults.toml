@@ -35,3 +35,53 @@ conditions = [
   { field = "attributes.motion_score", op = "gte", value = 0.8 },
   { field = "attributes.maintenance", op = "eq", value = false },
 ]
+
+# Windows observations require review; these rules do not establish malicious intent.
+[[rules]]
+id = "windows-service-installed"
+title = "Windows service installation recorded"
+severity = "medium"
+kind = "service.installed"
+cooldown_seconds = 0
+
+[[rules]]
+id = "windows-log-cleared"
+title = "Windows event log cleared"
+severity = "high"
+kind = "log.cleared"
+cooldown_seconds = 0
+
+[[rules]]
+id = "windows-defender-threat"
+title = "Microsoft Defender threat detection recorded"
+severity = "high"
+kind = "defender.threat"
+cooldown_seconds = 0
+
+[[rules]]
+id = "windows-defender-disabled"
+title = "Microsoft Defender protection disabled event"
+severity = "high"
+kind = "defender.disabled"
+cooldown_seconds = 0
+
+[[rules]]
+id = "windows-account-created"
+title = "Windows account creation recorded"
+severity = "medium"
+kind = "account.created"
+cooldown_seconds = 0
+
+[[rules]]
+id = "windows-group-member-added"
+title = "Local security group membership changed"
+severity = "medium"
+kind = "group.member_added"
+cooldown_seconds = 0
+
+[[rules]]
+id = "windows-unexpected-shutdown"
+title = "Unexpected Windows shutdown recorded"
+severity = "medium"
+kind = "system.unexpected_shutdown"
+cooldown_seconds = 0

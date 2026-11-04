@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="sentinel-token" content="__SENTINEL_TOKEN__">
+    <meta name="description" content="Sauron Sentinel yerel Windows güvenlik izleme paneli.">
+    <title>Sauron Sentinel · Güvenlik görünümü</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">İçeriğe geç</a>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Sauron Sentinel ana sayfa">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span class="brand-name">SAURON <strong>SENTINEL</strong></span>
+        </a>
+        <div class="topbar-right">
+          <span class="local-label"><span class="lock-icon" aria-hidden="true"></span>Yerel çalışma alanı</span>
+          <span class="connection-badge pending" id="connection-status" role="status">Bağlanıyor</span>
+        </div>
+      </header>
+
+      <main id="main">
+        <section class="page-heading" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow"><span aria-hidden="true"></span>GÜVENLİK GÖRÜNÜMÜ</p>
+            <h1 id="page-title">Bilgisayarında olanı gör.</h1>
+            <p class="heading-description">Windows günlüklerinden gerçek olaylar, açıklanabilir alarmlar.</p>
+          </div>
+          <div class="heading-actions">
+            <a class="button button-secondary" href="/api/export" download="sauron-sentinel-export.json">
+              <span aria-hidden="true">↓</span> Kayıtları dışa aktar
+            </a>
+            <button class="button button-primary" id="scan-button" type="button">
+              <span class="scan-icon" aria-hidden="true">↻</span><span id="scan-button-label">Şimdi tara</span>
+            </button>
+          </div>
+        </section>
+
+        <div class="notice notice-error" id="error-notice" role="alert" hidden></div>
+        <div class="notice notice-info" id="scan-notice" role="status" hidden></div>
+
+        <section class="metrics" aria-label="Olay ve alarm özeti">
+          <article class="metric-card">
+            <div class="metric-top"><h2>Saklanan olay</h2><span class="metric-symbol" aria-hidden="true">⌁</span></div>
+            <p class="metric-value" id="events-total">—</p>
+            <p class="metric-caption">Bu çalışma alanında tutulan kayıtlar</p>
+          </article>
+          <article class="metric-card">
+            <div class="metric-top"><h2>Son 24 saat</h2><span class="metric-symbol" aria-hidden="true">◷</span></div>
+            <p class="metric-value" id="events-day">—</p>
+            <p class="metric-caption">Olay zamanına göre toplanan kayıt</p>
+          </article>
+          <article class="metric-card alert-metric">
+            <div class="metric-top"><h2>Üretilen alarm</h2><span class="metric-symbol" aria-hidden="true">◇</span></div>
+            <p class="metric-value" id="alerts-total">—</p>
+            <p class="metric-caption">İnceleme gerektiren kural eşleşmeleri</p>
+          </article>
+          <article class="metric-card">
+            <div class="metric-top"><h2>Son 24 saatte alarm</h2><span class="metric-symbol" aria-hidden="true">◎</span></div>
+            <p class="metric-value" id="alerts-day">—</p>
+            <p class="metric-caption">Olay zamanına göre eşleşme</p>
+          </article>
+        </section>
+
+        <section class="sources-section" aria-labelledby="sources-title">
+          <div class="section-heading">
+            <div><h2 id="sources-title">Kaynak bağlantıları</h2><p>Bu bilgisayardaki Windows olay günlükleri</p></div>
+            <span class="monitor-status" id="monitor-status">İzleyici kontrol ediliyor</span>
+          </div>
+          <div class="source-grid" id="source-list">
+            <div class="source-placeholder">Kaynak durumları bekleniyor…</div>
+          </div>
+          <p class="permission-note" id="permission-note" hidden>Security günlüğü için yönetici erişimi gerekebilir. Diğer erişilebilir günlükler izlenmeye devam eder.</p>
+          <p class="permission-note" id="coverage-note" hidden></p>
+        </section>
+
+        <div class="workspace-toolbar">
+          <label class="search-field" for="search-input">
+            <span aria-hidden="true">⌕</span>
+            <input id="search-input" type="search" placeholder="Cihaz, kullanıcı, olay veya kural ara…" autocomplete="off">
+            <span class="search-hint">Bu görünümde ara</span>
+          </label>
+          <p class="last-update">Son tarama <time id="last-scan">henüz yapılmadı</time></p>
+        </div>
+
+        <div class="workspace-grid">
+          <section class="panel event-panel" aria-labelledby="events-title">
+            <div class="panel-heading">
+              <div class="panel-title"><h2 id="events-title">Olay akışı</h2><span class="count-badge" id="event-count">0</span></div>
+              <label class="sr-only" for="event-kind-filter">Olay türü</label>
+              <select id="event-kind-filter"><option value="">Tüm olay türleri</option></select>
+            </div>
+            <p class="panel-description">Toplanan son 100 kayıt · En yeni olay üstte</p>
+            <ol class="event-list" id="event-list"></ol>
+            <div class="empty-state" id="events-empty">
+              <span class="empty-symbol" aria-hidden="true">⌁</span>
+              <h3>Olay akışı hazırlanıyor</h3>
+              <p>Kaynaklara bağlanıldığında toplanan kayıtlar burada görünecek.</p>
+            </div>
+          </section>
+
+          <section class="panel alert-panel" aria-labelledby="alerts-title">
+            <div class="panel-heading">
+              <div class="panel-title"><h2 id="alerts-title">Alarmlar</h2><span class="count-badge" id="alert-count">0</span></div>
+              <label class="sr-only" for="severity-filter">Alarm önem düzeyi</label>
+              <select id="severity-filter">
+                <option value="">Tüm önem düzeyleri</option>
+                <option value="critical">Kritik</option>
+                <option value="high">Yüksek</option>
+                <option value="medium">Orta</option>
+                <option value="low">Düşük</option>
+              </select>
+            </div>
+            <p class="panel-description">Bir alarmı seçerek eşleşen kayıtları incele.</p>
+            <ol class="alert-list" id="alert-list"></ol>
+            <div class="empty-state" id="alerts-empty">
+              <span class="empty-symbol shield-symbol" aria-hidden="true">✓</span>
+              <h3>Alarmlar kontrol ediliyor</h3>
+              <p>Kurallarla eşleşen bir olay olduğunda burada listelenir.</p>
+            </div>
+            <div class="interpretation-note"><span aria-hidden="true">i</span><p>Alarm, bir kural eşleşmesidir. Tek başına saldırı gerçekleştiğini göstermez.</p></div>
+          </section>
+        </div>
+      </main>
+
+      <footer class="footer"><p><span class="privacy-dot" aria-hidden="true"></span>Veriler bu bilgisayarda kalır.</p><p>Sauron Sentinel <span id="app-version"></span><span class="footer-divider">/</span>Donanım bağlantıları henüz etkin değil</p></footer>
+    </div>
+
+    <dialog id="evidence-dialog" aria-labelledby="evidence-title">
+      <div class="evidence-header"><div><p class="eyebrow">ALARM İNCELEMESİ</p><h2 id="evidence-title">Alarmın dayandığı kayıtlar</h2></div><button class="icon-button" id="close-evidence" type="button" aria-label="Alarm incelemesini kapat">×</button></div>
+      <div class="evidence-body" id="evidence-body"><p>Kanıtlar yükleniyor…</p></div>
+    </dialog>
+    <noscript><p class="noscript-message">Güvenlik panelini görüntülemek için tarayıcıda JavaScript etkin olmalı.</p></noscript>
+  </body>
+</html>
