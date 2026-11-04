@@ -1,0 +1,37 @@
+# Demonstration heuristics, not validated attack signatures.
+schema_version = 1
+
+[[rules]]
+id = "auth-failure-burst"
+title = "Repeated authentication failures"
+severity = "medium"
+kind = "auth.failure"
+threshold = 5
+window_seconds = 60
+cooldown_seconds = 60
+group_by = ["device_id", "attributes.user"]
+
+[[rules]]
+id = "rf-activity-burst"
+title = "Burst of strong RF observations"
+severity = "low"
+kind = "rf.observation"
+threshold = 3
+window_seconds = 10
+cooldown_seconds = 30
+group_by = ["device_id"]
+conditions = [{ field = "attributes.rssi_dbm", op = "gte", value = -40 }]
+
+[[rules]]
+id = "motion-without-maintenance"
+title = "Motion indicator outside maintenance"
+severity = "low"
+kind = "motion.observation"
+threshold = 1
+window_seconds = 30
+cooldown_seconds = 60
+group_by = ["device_id"]
+conditions = [
+  { field = "attributes.motion_score", op = "gte", value = 0.8 },
+  { field = "attributes.maintenance", op = "eq", value = false },
+]

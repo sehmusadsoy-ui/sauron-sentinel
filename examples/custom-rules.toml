@@ -1,0 +1,13 @@
+# Local demonstration rule; tune only against labeled, authorized data.
+schema_version = 1
+
+[[rules]]
+id = "lab-auth-failures"
+title = "Repeated authentication failures for one user"
+severity = "medium"
+kind = "auth.failure"
+threshold = 3
+window_seconds = 30
+cooldown_seconds = 60
+group_by = ["device_id", "attributes.user"]
+conditions = [{ field = "attributes.user", op = "ne", value = "service-demo" }]

@@ -1,0 +1,12 @@
+{"schema_version":1,"timestamp":"2026-01-01T12:00:00Z","source":"synthetic","kind":"auth.success","device_id":"host-demo-01","synthetic":true,"attributes":{"user":"demo","ip":"192.0.2.10"}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:01Z","source":"synthetic","kind":"auth.failure","device_id":"host-demo-01","synthetic":true,"attributes":{"user":"demo","ip":"192.0.2.10"}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:02Z","source":"synthetic","kind":"auth.failure","device_id":"host-demo-01","synthetic":true,"attributes":{"user":"demo","ip":"192.0.2.10"}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:03Z","source":"synthetic","kind":"auth.failure","device_id":"host-demo-01","synthetic":true,"attributes":{"user":"demo","ip":"192.0.2.10"}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:04Z","source":"synthetic","kind":"auth.failure","device_id":"host-demo-01","synthetic":true,"attributes":{"user":"demo","ip":"192.0.2.10"}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:05Z","source":"synthetic","kind":"auth.failure","device_id":"host-demo-01","synthetic":true,"attributes":{"user":"demo","ip":"192.0.2.10"}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:06Z","source":"synthetic","kind":"rf.observation","device_id":"rf-demo-01","synthetic":true,"attributes":{"rssi_dbm":-70,"frequency_hz":433920000}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:07Z","source":"synthetic","kind":"rf.observation","device_id":"rf-demo-01","synthetic":true,"attributes":{"rssi_dbm":-35,"frequency_hz":433920000}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:08Z","source":"synthetic","kind":"rf.observation","device_id":"rf-demo-01","synthetic":true,"attributes":{"rssi_dbm":-34,"frequency_hz":433920000}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:09Z","source":"synthetic","kind":"rf.observation","device_id":"rf-demo-01","synthetic":true,"attributes":{"rssi_dbm":-36,"frequency_hz":433920000}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:10Z","source":"synthetic","kind":"motion.observation","device_id":"motion-demo-01","synthetic":true,"attributes":{"motion_score":0.1,"maintenance":false}}
+{"schema_version":1,"timestamp":"2026-01-01T12:00:11Z","source":"synthetic","kind":"motion.observation","device_id":"motion-demo-01","synthetic":true,"attributes":{"motion_score":0.92,"maintenance":false}}

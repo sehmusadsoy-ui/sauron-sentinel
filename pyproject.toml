@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sauron-sentinel"
+version = "0.1.0"
+description = "Local-first telemetry normalization and explainable detection for security labs"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Sauron Lab"}]
+keywords = ["security", "telemetry", "detection-engineering", "iot", "rf"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest==9.2.0", "pytest-cov==7.1.0", "ruff==0.17.3", "build==1.6.1"]
+
+[project.scripts]
+sauron-sentinel = "sauron_sentinel.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sehmusadsoy-ui/sauron-sentinel"
+Documentation = "https://github.com/sehmusadsoy-ui/sauron-sentinel/tree/main/docs"
+Issues = "https://github.com/sehmusadsoy-ui/sauron-sentinel/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sauron_sentinel = ["*.toml", "*.jsonl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+source = ["sauron_sentinel"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]

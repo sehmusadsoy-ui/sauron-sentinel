@@ -1,0 +1,17 @@
+name: Bug report
+description: Report a reproducible problem without private telemetry.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include expected behavior and a minimal synthetic example. Remove identifiers and secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, Sauron Sentinel version, command, and error message.
+    validations:
+      required: true
