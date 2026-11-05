@@ -67,7 +67,7 @@ def test_legacy_migration_preserves_exact_payloads_and_survives_restart(tmp_path
         )
     store = EventStore(tmp_path)
     try:
-        assert store._db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert store._db.execute("PRAGMA user_version").fetchone()[0] == 2
         initial = store.evidence(alert.alert_id)
         assert initial["review"] == {"status": "new", "note": "", "updated_at": None}
         assert initial["alert"] == alert.to_dict()

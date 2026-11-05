@@ -75,6 +75,9 @@
   const state = {
     data: null, fetching: false, scanning: false, evidenceRequest: 0, activeEvidence: null,
     evidenceReturnId: null, reviewRevision: 0, reviewOverrides: new Map(), pendingReviews: new Map(),
+    readRevision: 0, readOverrides: new Map(), pendingReads: new Map(),
+    preferences: null, preferencesDirty: false, preferencesSaving: false, preferenceRevision: 0,
+    preferenceOverride: null, notificationTesting: false, connected: false,
     renderedEvents: "", renderedAlerts: "", renderedSources: "",
   };
   const numberFormat = new Intl.NumberFormat("tr-TR");
@@ -142,6 +145,221 @@
       return await response.json();
     } finally {
       window.clearTimeout(timer);
+    }
+  }
+
+  function validPreferences(value) {
+    return value?.schema_version === 1 && typeof value.notifications_enabled === "boolean"
+      && ["low", "medium", "high"].includes(value.minimum_severity)
+      && Number.isInteger(value.scan_interval_seconds) && value.scan_interval_seconds >= 5 && value.scan_interval_seconds <= 3600;
+  }
+
+  function preferenceDraft() {
+    return {
+      schema_version: 1, notifications_enabled: node("notifications-enabled").checked,
+      minimum_severity: node("minimum-severity").value, scan_interval_seconds: Number(node("scan-interval").value),
+    };
+  }
+
+  function samePreferences(first, second) {
+    return validPreferences(first) && validPreferences(second) && first.notifications_enabled === second.notifications_enabled
+      && first.minimum_severity === second.minimum_severity && first.scan_interval_seconds === second.scan_interval_seconds;
+  }
+
+  function setPreferenceDraft(preferences) {
+    const select = node("scan-interval");
+    const fragment = document.createDocumentFragment();
+    for (const [seconds, label] of [[15, "15 saniye"], [30, "30 saniye"], [60, "1 dakika"], [300, "5 dakika"]]) {
+      const option = element("option", "", label);
+      option.value = String(seconds);
+      fragment.append(option);
+    }
+    if (![15, 30, 60, 300].includes(preferences.scan_interval_seconds)) {
+      const custom = element("option", "", `${count(preferences.scan_interval_seconds)} saniye (özel)`);
+      custom.value = String(preferences.scan_interval_seconds);
+      fragment.append(custom);
+    }
+    select.replaceChildren(fragment);
+    select.value = String(preferences.scan_interval_seconds);
+    node("notifications-enabled").checked = preferences.notifications_enabled;
+    node("minimum-severity").value = preferences.minimum_severity;
+  }
+
+  function updatePreferenceControls() {
+    const waiting = !state.preferences || !state.connected || !token;
+    const busy = state.preferencesSaving || state.notificationTesting;
+    for (const id of ["notifications-enabled", "minimum-severity", "scan-interval"]) node(id).disabled = waiting || busy;
+    node("save-preferences").disabled = waiting || busy || !state.preferencesDirty;
+    node("save-preferences").textContent = state.preferencesSaving ? "Kaydediliyor…" : "Ayarları kaydet";
+    node("preferences-form").setAttribute("aria-busy", state.preferencesSaving ? "true" : "false");
+    node("test-notification").disabled = waiting || busy || state.preferencesDirty
+      || !state.preferences?.notifications_enabled || state.data?.notifications?.available !== true;
+    node("test-notification").textContent = state.notificationTesting ? "Deneniyor…" : "Deneme bildirimi";
+    node("test-notification").setAttribute("aria-busy", state.notificationTesting ? "true" : "false");
+    node("scan-button").disabled = state.scanning || !state.connected || !token;
+  }
+
+  function renderPreferences(data) {
+    const preferences = state.preferenceOverride?.preferences || data.preferences;
+    if (validPreferences(preferences)) {
+      const replaceDraft = !state.preferences || (!state.preferencesDirty && !state.preferencesSaving);
+      state.preferences = preferences;
+      if (replaceDraft) setPreferenceDraft(preferences);
+      state.preferencesDirty = !samePreferences(preferenceDraft(), preferences);
+      node("preferences-summary").textContent = `Bildirimler ${preferences.notifications_enabled ? "açık" : "kapalı"} · ${count(preferences.scan_interval_seconds)} sn`;
+      if (!node("preferences-error").textContent && !state.preferencesDirty && !state.preferencesSaving
+        && node("preferences-feedback").textContent === "Ayarlar yükleniyor…") {
+        node("preferences-feedback").textContent = "Kaydedilen ayarlar gösteriliyor.";
+      }
+    }
+    // Keep this notice visible for the session, including after a successful save.
+    if (data.preferences_status === "reset_invalid" && node("preferences-reset").hidden) {
+      node("preferences-reset").hidden = false;
+      node("preferences-panel").open = true;
+    }
+    const notifications = data.notifications || {};
+    node("notification-capability").textContent = notifications.available === true
+      ? "Windows bildirim desteği kullanılabilir. Deneme bildirimi alarm oluşturmaz; önce ayarlarını kaydet."
+      : "Windows bildirimi için masaüstü bildirim desteği gerekir; bu oturumda kullanılamıyor. Alarmları bu panelden izleyebilirsin.";
+    const attempt = { attempting: "gönderim deneniyor", queued: "uygulamanın bildirim kuyruğuna alındı; Windows’ta görüntülendiği doğrulanamaz", failed: "gönderim tamamlanamadı" }[notifications.last_attempt_status];
+    const deliveryError = {
+      unsupported_platform: "Windows bildirimleri bu işletim sisteminde kullanılamıyor.",
+      not_initialized: "Masaüstü bildirim desteği henüz hazır değil.",
+      native_unavailable: "Windows bildirim desteği kullanılamıyor.",
+      notification_failed: "Bildirim gönderimi tamamlanamadı.",
+    }[notifications.last_error];
+    const attemptTime = notifications.last_attempt_at ? ` · ${formatDate(notifications.last_attempt_at)}` : "";
+    notice("notification-last-attempt", deliveryError ? `${deliveryError} Alarmları panelden izleyebilirsin.${attemptTime}`
+      : attempt ? `Son bildirim denemesi: ${attempt}${attemptTime}.` : "");
+    node("notification-last-attempt").classList.toggle("failed", Boolean(deliveryError));
+    if (!token) notice("preferences-error", "Oturum doğrulanamadı. Ayarları değiştirmek için sayfayı yenile.");
+    updatePreferenceControls();
+  }
+
+  function preferencesChanged() {
+    state.preferencesDirty = !samePreferences(preferenceDraft(), state.preferences);
+    notice("preferences-error", "");
+    node("preferences-feedback").textContent = state.preferencesDirty ? "Değişiklikler henüz kaydedilmedi. Deneme için önce ayarları kaydet." : "Kaydedilen ayarlar gösteriliyor.";
+    node("preferences-feedback").className = "preferences-feedback";
+    notice("notification-test-feedback", "");
+    notice("notification-test-error", "");
+    updatePreferenceControls();
+  }
+
+  async function savePreferences(event) {
+    event.preventDefault();
+    if (state.preferencesSaving || state.notificationTesting || !state.connected || !token || !state.preferences) return;
+    const preferences = preferenceDraft();
+    if (!validPreferences(preferences)) {
+      notice("preferences-error", "Ayarlar geçerli değil. Önem düzeyini ve tarama aralığını kontrol et.");
+      return;
+    }
+    state.preferencesSaving = true;
+    notice("preferences-error", "");
+    node("preferences-feedback").textContent = "Ayarlar kaydediliyor…";
+    node("preferences-feedback").className = "preferences-feedback";
+    updatePreferenceControls();
+    try {
+      const result = await api("/api/preferences", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Token": token }, body: JSON.stringify(preferences),
+      });
+      if (!validPreferences(result.preferences) || result.preferences_status !== "ok") throw new Error("invalid_preferences_response");
+      state.preferenceRevision += 1;
+      state.preferenceOverride = { preferences: result.preferences, revision: state.preferenceRevision };
+      state.preferences = result.preferences;
+      setPreferenceDraft(result.preferences);
+      state.preferencesDirty = false;
+      renderPreferences(state.data || {});
+      node("preferences-feedback").textContent = "Ayarlar kaydedildi. Uygulamayı yeniden açtığında korunur.";
+      node("preferences-feedback").className = "preferences-feedback saved";
+    } catch (error) {
+      node("preferences-feedback").textContent = "";
+      notice("preferences-error", error.status === 403 ? "Oturum doğrulanamadı. Sayfayı yenileyip tekrar dene."
+        : error.code === "invalid_preferences" ? "Ayarlar kabul edilmedi. Seçimlerini kontrol edip yeniden dene."
+          : "Ayarların kaydedildiği doğrulanamadı. Seçimlerin bu formda duruyor; yeniden kaydetmeyi deneyebilirsin.");
+    } finally {
+      state.preferencesSaving = false;
+      updatePreferenceControls();
+    }
+  }
+
+  async function testNotification() {
+    if (node("test-notification").disabled || state.notificationTesting) return;
+    state.notificationTesting = true;
+    notice("notification-test-error", "");
+    notice("notification-test-feedback", "Deneme bildirimi gönderilmeye çalışılıyor. Bu bir alarm değildir.");
+    updatePreferenceControls();
+    try {
+      const result = await api("/api/notifications/test", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Token": token }, body: "{}",
+      });
+      if (result.status !== "queued") throw new Error("invalid_notification_response");
+      notice("notification-test-feedback", "Deneme uygulamanın bildirim kuyruğuna alındı. Bu bir alarm değildir. Windows bildirimi göstermeyebilir; teslim edildiği doğrulanamaz.");
+    } catch (error) {
+      notice("notification-test-feedback", "");
+      const message = error.status === 403 ? "Oturum doğrulanamadı. Sayfayı yenileyip tekrar dene."
+        : error.code === "notifications_disabled" ? "Windows bildirimleri kapalı. Bildirimleri açıp ayarları kaydet."
+          : error.code === "notifications_unavailable" ? "Bu oturumda Windows bildirim desteği kullanılamıyor. Alarmları panelden izleyebilirsin."
+            : "Deneme bildiriminin gönderildiği doğrulanamadı. Windows bildirim ayarlarını kontrol edip yeniden deneyebilirsin.";
+      notice("notification-test-error", message);
+    } finally {
+      state.notificationTesting = false;
+      updatePreferenceControls();
+    }
+  }
+
+  function unreadFor(alert) {
+    return state.readOverrides.has(alert.alert_id) ? false : alert.unread === true;
+  }
+
+  function renderUnreadCount() {
+    const total = state.data?.notifications?.unread_count;
+    const available = Number.isInteger(total) && total >= 0;
+    const alerts = Array.isArray(state.data?.alerts) ? state.data.alerts : [];
+    // Apply only reads missing from this snapshot. Older replies cannot hide
+    // newly collected alarms or put a completed read back into the count.
+    const newlyRead = alerts.filter((alert) => alert.unread === true && state.readOverrides.has(alert.alert_id)).length;
+    notice("unread-count", available ? `${count(Math.max(0, total - newlyRead))} okunmadı` : "");
+  }
+
+  function persistRead(alertId) {
+    if (state.pendingReads.has(alertId)) return state.pendingReads.get(alertId);
+    const operation = (async () => {
+      const result = await api(`/api/alerts/${alertId}/read`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Token": token }, body: "{}",
+      });
+      if (result.unread !== false || !Number.isInteger(result.unread_count) || result.unread_count < 0) throw new Error("invalid_read_response");
+      state.readRevision += 1;
+      state.readOverrides.set(alertId, { revision: state.readRevision });
+      renderAlerts();
+      renderUnreadCount();
+      return result;
+    })();
+    state.pendingReads.set(alertId, operation);
+    operation.finally(() => { if (state.pendingReads.get(alertId) === operation) state.pendingReads.delete(alertId); }).catch(() => {});
+    return operation;
+  }
+
+  async function markEvidenceRead(alertId, request, feedback, retry) {
+    const current = () => evidenceIsCurrent(request, alertId) && node("evidence-body").contains(feedback);
+    if (!current()) return;
+    if (!token) {
+      feedback.textContent = "Ayrıntılar açıldı; okundu bilgisini saklamak için oturum doğrulanamadı. Sayfayı yenile.";
+      return;
+    }
+    retry.hidden = true;
+    feedback.textContent = "Okundu bilgisi kaydediliyor…";
+    feedback.className = "evidence-read-status";
+    try {
+      if (!state.readOverrides.has(alertId)) await persistRead(alertId);
+      if (current()) feedback.textContent = "Okundu bilgisi kaydedildi. Değerlendirmen ayrıca saklanır.";
+    } catch (error) {
+      if (!current()) return;
+      feedback.textContent = error.status === 403 ? "Okundu bilgisi kaydedilemedi. Oturum için sayfayı yenile."
+        : error.status === 404 ? "Alarm artık bulunamadığı için okundu bilgisi kaydedilemedi."
+          : "Ayrıntılar açıldı; okundu bilgisi kaydedilemedi. Yeniden deneyebilirsin.";
+      feedback.className = "evidence-read-status failed";
+      retry.hidden = error.status === 403 || error.status === 404;
     }
   }
 
@@ -286,12 +504,15 @@
     button.dataset.alertId = alert.alert_id;
     const title = alertNames[alert.rule_id] || alert.title || alert.rule_id;
     const review = reviewFor(alert);
-    button.setAttribute("aria-label", `${title}. ${reviewNames[review.status]}. Açıklamayı ve kayıtları incele.`);
+    const unread = unreadFor(alert);
+    button.classList.toggle("unread", unread);
+    button.setAttribute("aria-label", `${title}. ${unread ? "Okunmadı. " : ""}${reviewNames[review.status]}. Açıklamayı ve kayıtları incele.`);
     const top = element("div", "alert-topline");
     const time = element("time", "event-time", formatDate(alert.timestamp, dateFormat));
     time.dateTime = alert.timestamp || "";
     const badges = element("div", "alert-badges");
     badges.append(element("span", `severity-badge ${severity}`, severityNames[severity]), element("span", `review-badge ${review.status}`, reviewNames[review.status]));
+    if (unread) badges.append(element("span", "unread-marker", "Okunmadı"));
     top.append(badges, time);
     const meta = element("div", "alert-meta");
     const group = alert.group || {};
@@ -312,7 +533,7 @@
     const query = node("search-input").value.trim().toLocaleLowerCase("tr-TR");
     const severity = node("severity-filter").value;
     const filtered = alerts.filter((alert) => (!severity || alert.severity === severity) && searchMatches([{ ...alert, review: reviewFor(alert) }, alertNames[alert.rule_id], reviewNames[reviewFor(alert).status]], query));
-    const fingerprint = JSON.stringify([alerts.map((alert) => [alert.alert_id, reviewFor(alert)]), query, severity]);
+    const fingerprint = JSON.stringify([alerts.map((alert) => [alert.alert_id, reviewFor(alert), unreadFor(alert)]), query, severity]);
     if (state.renderedAlerts === fingerprint) return;
     state.renderedAlerts = fingerprint;
     const fragment = document.createDocumentFragment();
@@ -344,13 +565,20 @@
     if (state.fetching) return;
     state.fetching = true;
     const reviewRevision = state.reviewRevision;
+    const readRevision = state.readRevision;
+    const preferenceRevision = state.preferenceRevision;
     try {
       const data = await api("/api/state");
       // A response requested before a save must not put the previous review back.
       for (const [alertId, saved] of state.reviewOverrides) {
         if (saved.revision <= reviewRevision) state.reviewOverrides.delete(alertId);
       }
+      for (const [alertId, saved] of state.readOverrides) {
+        if (saved.revision <= readRevision) state.readOverrides.delete(alertId);
+      }
+      if (state.preferenceOverride?.revision <= preferenceRevision) state.preferenceOverride = null;
       state.data = data;
+      state.connected = true;
       const summary = data.summary || {};
       node("events-total").textContent = count(summary.events_total);
       node("events-day").textContent = count(summary.events_24h);
@@ -367,10 +595,14 @@
       syncKindOptions(Array.isArray(data.events) ? data.events : []);
       renderEvents();
       renderAlerts();
+      renderUnreadCount();
+      renderPreferences(data);
       node("connection-status").textContent = "Panel bağlı";
       node("connection-status").className = "connection-badge";
       notice("error-notice", data.monitor?.last_error ? "Windows günlükleri okunurken bir sorun oluştu. Kaynak durumlarını kontrol et; otomatik izleme yeniden deneyecek." : "");
     } catch {
+      state.connected = false;
+      updatePreferenceControls();
       node("connection-status").textContent = "Panel bağlantısı kesildi";
       node("connection-status").className = "connection-badge offline";
       node("health-title").textContent = "Kaynak durumu güncellenemiyor";
@@ -385,7 +617,7 @@
   }
 
   async function scan() {
-    if (state.scanning) return;
+    if (state.scanning || !state.connected || !token) return;
     state.scanning = true;
     node("scan-button").disabled = true;
     node("scan-button").classList.add("scanning");
@@ -413,7 +645,7 @@
       notice("error-notice", error.name === "AbortError" ? "Tarama yanıtı gecikti. İzleyicinin durumunu kontrol et; görünüm yenilenmeye devam edecek." : error.message);
     } finally {
       state.scanning = false;
-      node("scan-button").disabled = false;
+      updatePreferenceControls();
       node("scan-button").classList.remove("scanning");
       node("scan-button").removeAttribute("aria-busy");
       node("scan-button-label").textContent = "Şimdi tara";
@@ -528,9 +760,9 @@
       validation.textContent = error;
       validation.hidden = !error;
       note.setAttribute("aria-invalid", error ? "true" : "false");
-      select.disabled = busy;
-      note.disabled = busy;
-      save.disabled = busy || Boolean(error);
+      select.disabled = busy || !token;
+      note.disabled = busy || !token;
+      save.disabled = busy || !token || Boolean(error);
       save.textContent = busy ? "Kaydediliyor…" : "Değerlendirmeyi kaydet";
       form.setAttribute("aria-busy", busy ? "true" : "false");
       savedAt.textContent = savedReview.updated_at ? `Son kayıt: ${formatDate(savedReview.updated_at)}` : "Henüz değerlendirme kaydedilmedi.";
@@ -545,7 +777,7 @@
     note.addEventListener("input", changed);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (busy || !current()) return;
+      if (busy || !token || !current()) return;
       const payload = { status: select.value, note: note.value };
       if (!Object.hasOwn(reviewNames, payload.status) || reviewNoteError(payload.note)) {
         update();
@@ -643,6 +875,20 @@
       for (const event of events) list.append(eventItem(event, events.length <= 3));
       body.append(list);
       if (!events.length) body.append(element("p", "evidence-note", "Bu alarm için erişilebilir olay kaydı bulunamadı."));
+      if (data.unread === true) {
+        const readRow = element("div", "evidence-read-row");
+        const readFeedback = element("p", "evidence-read-status");
+        readFeedback.setAttribute("role", "status");
+        readFeedback.setAttribute("aria-live", "polite");
+        const retry = element("button", "button button-secondary", "Okundu bilgisini yeniden kaydet");
+        retry.type = "button";
+        retry.hidden = true;
+        retry.addEventListener("click", () => markEvidenceRead(current.alert_id, request, readFeedback, retry));
+        readRow.append(readFeedback, retry);
+        body.append(readRow);
+        body.removeAttribute("aria-busy");
+        await markEvidenceRead(current.alert_id, request, readFeedback, retry);
+      }
     } catch (error) {
       if (!evidenceIsCurrent(request, alert.alert_id)) return;
       const message = error.status === 403 ? "Oturum doğrulanamadı. Sayfayı yenileyip tekrar dene."
@@ -662,6 +908,11 @@
   }
 
   node("scan-button").addEventListener("click", scan);
+  node("preferences-form").addEventListener("submit", savePreferences);
+  node("notifications-enabled").addEventListener("change", preferencesChanged);
+  node("minimum-severity").addEventListener("change", preferencesChanged);
+  node("scan-interval").addEventListener("change", preferencesChanged);
+  node("test-notification").addEventListener("click", testNotification);
   node("search-input").addEventListener("input", () => { renderEvents(); renderAlerts(); });
   node("event-kind-filter").addEventListener("change", renderEvents);
   node("severity-filter").addEventListener("change", renderAlerts);

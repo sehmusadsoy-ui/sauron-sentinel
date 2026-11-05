@@ -36,7 +36,7 @@
             <a class="button button-secondary" href="/api/export" download="sauron-sentinel-export.json">
               <span aria-hidden="true">↓</span> Kayıtları dışa aktar
             </a>
-            <button class="button button-primary" id="scan-button" type="button">
+            <button class="button button-primary" id="scan-button" type="button" disabled>
               <span class="scan-icon" aria-hidden="true">↻</span><span id="scan-button-label">Şimdi tara</span>
             </button>
           </div>
@@ -96,6 +96,30 @@
           <p class="permission-note" id="coverage-note" hidden></p>
         </section>
 
+        <details class="preferences-panel" id="preferences-panel">
+          <summary><span>İzleme ve bildirim ayarları</span><span class="preferences-summary" id="preferences-summary">Ayarlar bekleniyor</span></summary>
+          <div class="preferences-content">
+            <p class="preferences-intro">Ayarlar bu bilgisayarda saklanır ve uygulamayı yeniden açtığında korunur. Pencereyi kapatınca izleme ve bildirimler durur; arka plan hizmeti çalışmaz.</p>
+            <p class="preferences-reset" id="preferences-reset" role="status" hidden>Saklanan ayarlar geçersizdi; güvenli varsayılanlara dönüldü: bildirimler kapalı, en düşük önem Orta, tarama aralığı 15 saniye. Seçimlerini kaydedebilirsin.</p>
+            <form id="preferences-form" class="preferences-form" novalidate>
+              <label class="notification-toggle" for="notifications-enabled"><input id="notifications-enabled" type="checkbox" disabled><span>Windows bildirimlerini aç<span class="field-help">Varsayılan olarak kapalıdır. Yalnızca yeni ve seçtiğin önem düzeyindeki alarmlar için denenir.</span></span></label>
+              <div class="preferences-fields">
+                <label for="minimum-severity">En düşük bildirim önemi<select id="minimum-severity" disabled><option value="low">Düşük ve üzeri</option><option value="medium" selected>Orta ve üzeri</option><option value="high">Yüksek ve üzeri</option></select></label>
+                <label for="scan-interval">Otomatik tarama aralığı<select id="scan-interval" disabled><option value="15">15 saniye</option><option value="30">30 saniye</option><option value="60">1 dakika</option><option value="300">5 dakika</option></select></label>
+              </div>
+              <p class="field-help">Bildirim önem seçimi yalnızca Windows bildirimlerini etkiler; paneldeki alarm listesi korunur. Tarama aralığı bir sonraki otomatik kontrolde uygulanır.</p>
+              <div class="preferences-actions"><button class="button button-primary" id="save-preferences" type="submit" disabled>Ayarları kaydet</button><p class="preferences-feedback" id="preferences-feedback" role="status" aria-live="polite">Ayarlar yükleniyor…</p></div>
+              <p class="preferences-error" id="preferences-error" role="alert" hidden></p>
+            </form>
+            <div class="notification-test">
+              <div><p class="notification-capability" id="notification-capability">Windows bildirim desteği kontrol ediliyor.</p><p class="field-help">Windows ayarları bildirimi sessize alabilir veya göstermeyebilir. Kuyruğa alınması, ekranda gösterildiğini doğrulamaz.</p><p class="notification-last-attempt" id="notification-last-attempt" hidden></p></div>
+              <button class="button button-secondary" id="test-notification" type="button" disabled>Deneme bildirimi</button>
+            </div>
+            <p class="preferences-feedback" id="notification-test-feedback" role="status" aria-live="polite" hidden></p>
+            <p class="preferences-error" id="notification-test-error" role="alert" hidden></p>
+          </div>
+        </details>
+
         <div class="workspace-toolbar">
           <label class="search-field" for="search-input">
             <span aria-hidden="true">⌕</span>
@@ -123,7 +147,7 @@
 
           <section class="panel alert-panel" aria-labelledby="alerts-title">
             <div class="panel-heading">
-              <div class="panel-title"><h2 id="alerts-title" tabindex="-1">Alarmlar</h2><span class="count-badge" id="alert-count">0</span></div>
+              <div class="panel-title"><h2 id="alerts-title" tabindex="-1">Alarmlar</h2><span class="count-badge" id="alert-count">0</span><span class="unread-count" id="unread-count" role="status" hidden></span></div>
               <label class="sr-only" for="severity-filter">Alarm önem düzeyi</label>
               <select id="severity-filter">
                 <option value="">Tüm önem düzeyleri</option>
@@ -133,7 +157,7 @@
                 <option value="low">Düşük</option>
               </select>
             </div>
-            <p class="panel-description">Bir alarmı seçerek eşleşen kayıtları incele.</p>
+            <p class="panel-description">Ayrıntıları açılan alarm okundu sayılır. Değerlendirme durumunu ayrıca kaydedebilirsin.</p>
             <ol class="alert-list" id="alert-list"></ol>
             <div class="empty-state" id="alerts-empty">
               <span class="empty-symbol shield-symbol" aria-hidden="true">✓</span>

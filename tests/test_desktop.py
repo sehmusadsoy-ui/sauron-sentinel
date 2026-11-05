@@ -74,11 +74,27 @@ class FakeWebview:
             raise self.failure
 
 
+class FakeNotifier:
+    def __init__(self):
+        self.bound = []
+        self.closed = False
+
+    def snapshot(self):
+        return {"available": False, "last_error": "not_initialized"}
+
+    def bind(self, window):
+        self.bound.append(window)
+
+    def close(self):
+        self.closed = True
+
+
 class FakeRuntime:
     def __init__(self, directory):
         self.data_dir = Path(directory)
         self.closed = False
         self.started = False
+        self.notifier = FakeNotifier()
 
     def start(self):
         self.started = True
@@ -86,6 +102,7 @@ class FakeRuntime:
 
     def close(self):
         self.closed = True
+        self.notifier.close()
 
 
 def test_default_windows_data_is_per_user_not_source_checkout(tmp_path, monkeypatch):
@@ -150,7 +167,8 @@ def test_os_lock_released_when_owning_process_exits(tmp_path):
 
 
 def test_runtime_dynamic_loopback_and_clean_close(tmp_path):
-    runtime = desktop.DesktopRuntime(tmp_path, collector=_empty_collector)
+    notifier = FakeNotifier()
+    runtime = desktop.DesktopRuntime(tmp_path, collector=_empty_collector, notifier=notifier)
     try:
         origin = runtime.start()
         assert origin.startswith("http://127.0.0.1:")
@@ -164,6 +182,7 @@ def test_runtime_dynamic_loopback_and_clean_close(tmp_path):
         runtime.close()
     assert not runtime._http_thread.is_alive()
     assert not monitor_thread.is_alive()
+    assert notifier.closed
     replacement = desktop.InstanceLock(tmp_path)
     replacement.acquire()
     replacement.release()
@@ -189,6 +208,7 @@ def test_runtime_second_instance_cannot_start_monitor(tmp_path):
 @pytest.mark.parametrize("failure_at", ["store", "monitor", "server", "monitor_start"])
 def test_partial_startup_always_releases_resources(tmp_path, monkeypatch, failure_at):
     closed = []
+    notifier = FakeNotifier()
 
     class Store:
         def __init__(self, path):
@@ -200,6 +220,7 @@ def test_partial_startup_always_releases_resources(tmp_path, monkeypatch, failur
 
     class Monitor:
         def __init__(self, store, **kwargs):
+            assert kwargs["notifier"] is notifier
             if failure_at == "monitor":
                 raise OSError("private failure")
 
@@ -230,9 +251,10 @@ def test_partial_startup_always_releases_resources(tmp_path, monkeypatch, failur
     monkeypatch.setattr(desktop, "EventStore", Store)
     monkeypatch.setattr(desktop, "LiveMonitor", Monitor)
     monkeypatch.setattr(desktop, "DashboardServer", Server)
-    runtime = desktop.DesktopRuntime(tmp_path)
+    runtime = desktop.DesktopRuntime(tmp_path, notifier=notifier)
     with pytest.raises(OSError):
         runtime.start()
+    assert notifier.closed
     if failure_at != "store":
         assert "store" in closed
     if failure_at in ("server", "monitor_start"):
@@ -264,6 +286,7 @@ def test_native_window_has_no_api_bridge_and_forces_modern_renderer(tmp_path):
     assert webview.settings["ALLOW_DOWNLOADS"] is True
     assert webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
     assert webview.settings["REMOTE_DEBUGGING_PORT"] is None
+    assert runtime.notifier.bound == [webview.window]
 
 
 def test_legacy_renderer_refused(tmp_path):

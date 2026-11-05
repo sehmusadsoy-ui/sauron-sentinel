@@ -28,6 +28,7 @@ from urllib.request import urlopen
 from . import __version__
 from .live import DashboardServer, EventStore, LiveMonitor
 from .models import ValidationError
+from .native_notifications import WindowsNotificationAdapter
 from .rules import load_rules
 from .windows import CHANNELS, CollectionBatch
 
@@ -109,9 +110,10 @@ class InstanceLock:
 class DesktopRuntime:
     """Own the lock, database, monitor, and HTTP worker as one lifecycle."""
 
-    def __init__(self, data_dir: Path, *, collector=None):
+    def __init__(self, data_dir: Path, *, collector=None, notifier=None):
         self.data_dir = Path(data_dir)
         self.collector = collector
+        self.notifier = WindowsNotificationAdapter() if notifier is None else notifier
         self.lock = InstanceLock(self.data_dir)
         self.store: EventStore | None = None
         self.monitor: LiveMonitor | None = None
@@ -134,7 +136,9 @@ class DesktopRuntime:
             self.startup_stage = "configuration"
             load_rules()
             self.startup_stage = "monitor"
-            options = {} if self.collector is None else {"collector": self.collector}
+            options = {"notifier": self.notifier}
+            if self.collector is not None:
+                options["collector"] = self.collector
             self.monitor = LiveMonitor(self.store, **options)
             self.startup_stage = "server"
             self.server = DashboardServer(self.monitor, port=0)
@@ -157,6 +161,8 @@ class DesktopRuntime:
             if self._closed:
                 return
             self._closed = True
+            with contextlib.suppress(Exception):
+                self.notifier.close()
             if self.server is not None:
                 if self._http_thread is not None and self._http_thread.is_alive():
                     with contextlib.suppress(Exception):
@@ -405,6 +411,7 @@ def _run_window(runtime: DesktopRuntime, webview) -> None:
     def before_show(window):
         try:
             _protect_native_window(window, origin)
+            runtime.notifier.bind(window)
         except Exception as exc:
             failed.append(exc)
             window.native.Close()

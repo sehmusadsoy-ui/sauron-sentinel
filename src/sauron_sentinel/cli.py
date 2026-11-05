@@ -142,7 +142,9 @@ def main(argv: list[str] | None = None) -> int:
     live = commands.add_parser("serve", help="Open a local dashboard with real Windows logs")
     live.add_argument("--data-dir", type=Path, default=Path("sentinel-data"))
     live.add_argument("--port", type=int, default=8765)
-    live.add_argument("--interval", type=int, default=15)
+    live.add_argument(
+        "--interval", type=int, help="Scan interval in seconds (saved setting, or 15 by default)"
+    )
     live.add_argument("--lookback-hours", type=int, default=24)
     live.add_argument("--open-browser", action="store_true")
     windows = commands.add_parser("collect-windows", help="Export selected local Windows events")
