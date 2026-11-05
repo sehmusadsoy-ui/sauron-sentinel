@@ -23,6 +23,14 @@ python -m build
 
 Tests should cover an observable behavior or a trust boundary. Include negative inputs for schema or rule changes. Do not lower the coverage gate to conceal an untested failure path.
 
+## Desktop and portable builds
+
+The standard development environment and test matrix do not require a GUI runtime. Desktop tests should mock the window host and exercise lifecycle, instance locking, data paths, and shutdown. Verify a real Windows launch/close separately before distributing a portable artifact.
+
+On a supported Windows x64 Python environment, install `.[desktop,desktop-build]` and run `python scripts/build_desktop.py`. See the [desktop guide](docs/desktop.md) for the full package layout and system-runtime requirement. Keep the portable build free of live databases, logs, captures, user profiles, and local absolute paths in human-readable manifests/notices. Preserve third-party license notices.
+
+Do not add an installer, autostart behavior, elevation, automatic WebView2 installation, or a remote listener as an incidental packaging change. The existing portable edition does not require those behaviors.
+
 ## Data and rule changes
 
 - Use synthetic telemetry in tests and issue reports. Mark it explicitly and avoid secrets or real identifiers.

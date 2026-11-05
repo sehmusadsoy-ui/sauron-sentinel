@@ -6,17 +6,29 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Sauron Sentinel is a local security-monitoring application with a Turkish browser dashboard, a read-only Windows Event Log collector, persistent SQLite storage, and an explainable rule engine. It shows real observations from the current computer, source availability, and alerts backed by event evidence.
+Sauron Sentinel is a local Windows security-monitoring application with a Turkish desktop window, a read-only Windows Event Log collector, persistent SQLite storage, and an explainable rule engine. It shows real observations from the current computer, source availability, and alerts backed by event evidence. The same dashboard is also available through the local browser/CLI mode.
 
-**Version 0.2.0 adds live Windows monitoring.** The JSONL analysis tools and explicitly synthetic demo remain available for reproducible experiments. The runtime uses the Python standard library; dashboard assets are bundled locally.
+**Version 0.3.0 adds a portable Windows desktop edition.** Its ZIP includes Python and application dependencies, so the target computer does not need a Python installation. The desktop window uses an existing Microsoft WebView2 Runtime. The core monitoring/CLI runtime still uses the Python standard library; desktop support is an optional dependency group.
 
 RF Canvas, CSI Radar, and LabMate remain **future integration targets**. No Flipper Zero/ESP32 firmware, serial collector, RF capture, or CSI processing is implemented in this release.
 
-## Start on Windows
+## Portable Windows app
+
+1. Get `Sauron-Sentinel-0.3.0-Windows-x64.zip` from the [release assets](https://github.com/sehmusadsoy-ui/sauron-sentinel/releases).
+2. Extract the whole ZIP to a folder you can access.
+3. Open the extracted `SauronSentinel` folder and double-click **`SauronSentinel.exe`**.
+
+Keep the application files together; moving only the executable will break the portable edition. No installer, administrator prompt, autostart registration, or desktop shortcut is created. Close the window to stop its monitoring and local server.
+
+Requires Windows 10/11 x64 and the [Microsoft WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). Sentinel does not automatically download or install that runtime. The executable is unsigned, so Windows may display an unknown-publisher warning. Use the published checksum to compare your download; a checksum does not replace a publisher signature.
+
+Desktop data is stored separately under `%LOCALAPPDATA%\SauronSentinel`, outside the extracted application folder. The ZIP contains application code/resources, not your monitoring history. Existing source-mode data in `sentinel-data` is left in place and is not imported automatically. See the [desktop guide](docs/desktop.md) for requirements, data locations, and building the portable edition.
+
+## Run from source on Windows
 
 Requires Python 3.11 or newer and Windows PowerShell. Download or clone the repository, then double-click **`start-sentinel.cmd`**.
 
-The launcher prepares a project-local `.venv` on first use, installs the application, starts monitoring, and opens [the local dashboard](http://127.0.0.1:8765/). Keep its terminal window open; press **Ctrl+C** to stop. Initial setup may download Python build tools. Later launches reuse the installed environment without running an installation when its version matches the checkout.
+This source launcher prepares a project-local `.venv` on first use, installs the CLI application, starts monitoring, and opens [the local browser dashboard](http://127.0.0.1:8765/). Keep its terminal window open; press **Ctrl+C** to stop. Initial setup may download Python build tools. Later launches reuse the installed environment without running an installation when its version matches the checkout.
 
 You can also start it from PowerShell:
 
@@ -50,6 +62,7 @@ Windows may restrict Security or Defender log access for the current account. Mi
 | Capability | Implementation |
 | --- | --- |
 | Windows collection | Read-only, bounded `Get-WinEvent` queries for selected event IDs |
+| Portable desktop | Windowed Windows x64 application, no Python installation required on the target |
 | Browser dashboard | Turkish local interface bound to IPv4 loopback |
 | Persistence | Local SQLite event and alert history |
 | JSONL analysis | Streaming file/stdin ingestion with strict schema validation |
@@ -82,6 +95,15 @@ sauron-sentinel serve --port 8765 --data-dir sentinel-data --interval 15 --lookb
 ```
 
 The dashboard listens only on `127.0.0.1`; LAN/public binding is not supported. Local history is stored under `sentinel-data`. Stop the process before moving or removing that directory. Keep its contents private and out of Git.
+
+For a source-based desktop launch on Windows, install the optional desktop group and run its GUI entry point:
+
+```sh
+python -m pip install ".[desktop]"
+sauron-sentinel-desktop
+```
+
+The desktop edition selects an available loopback port automatically and uses the per-user data directory described above. It enforces one running desktop instance for that user data location.
 
 Restart/recovery replay saves previously missing alert matches without overwriting existing alert records. This also recovers a stop between committing an event and saving its alert, as long as the event is retained. A database-access error is reported without automatically resetting the existing database.
 
@@ -167,6 +189,6 @@ python -m build
 
 CI tests Windows and Ubuntu with Python 3.11 and 3.14, enforces branch coverage, and smoke-tests an installed wheel. Host-specific collection tests use synthetic operating-system responses; a live smoke check separately verifies the current computer's accessible channels. Coverage is not a real-world detection-accuracy metric.
 
-Runtime code uses the standard library. Build and development tools are pinned at the top level in `pyproject.toml`; pip resolves their transitive dependencies. Actions use full commit pins and read-only permissions. Dependabot proposes updates.
+Core monitoring and CLI code use the standard library. The optional desktop edition uses pywebview, Python/.NET interoperability, and Microsoft's installed WebView2 Runtime. Desktop build tools and top-level development dependencies are pinned in `pyproject.toml`; pip resolves transitive dependencies. The separate manual Windows packaging workflow builds a portable artifact without collecting live user data. Actions use full commit pins and read-only repository permissions. Dependabot proposes updates.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Released under the [MIT License](LICENSE). A Sauron Lab project.

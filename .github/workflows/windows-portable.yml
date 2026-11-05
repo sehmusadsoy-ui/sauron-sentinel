@@ -1,0 +1,49 @@
+name: Windows portable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Windows x64 portable artifact
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+          architecture: x64
+          cache: pip
+      - name: Install desktop build dependencies
+        run: python -m pip install -e ".[desktop,desktop-build]"
+      - name: Read package version
+        id: package
+        shell: pwsh
+        run: |
+          $packageVersion = & python -c "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read package version' }
+          "version=$packageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Build and verify portable package
+        run: python scripts/build_desktop.py
+      - name: Upload package and verification manifests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64
+          path: |
+            ${{ github.workspace }}/../outputs/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64.zip
+            ${{ github.workspace }}/../outputs/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64/SHA256SUMS.txt
+            ${{ github.workspace }}/../outputs/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64/build-manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          include-hidden-files: false

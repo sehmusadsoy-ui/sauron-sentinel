@@ -1,6 +1,12 @@
 # Architecture
 
-Sauron Sentinel v0.2.0 has two entry paths: a persistent local Windows monitor with a browser dashboard, and a strict JSONL batch-analysis CLI. Both use the same normalized event contract and declarative rule engine. Neither acquires radio data or authenticates external sensors.
+Sauron Sentinel v0.3.0 has three entry paths: a portable Windows desktop window, persistent local browser monitoring, and a strict JSONL batch-analysis CLI. All share the normalized event contract and declarative rule engine. None acquires radio data or authenticates external sensors.
+
+## Desktop lifecycle
+
+The optional pywebview host opens the bundled dashboard through EdgeChromium/WebView2. It starts the existing monitor/server on a dynamically selected IPv4 loopback port. A per-user instance lock prevents two desktop copies from intentionally opening the same data directory. Window closure stops monitoring and closes the local server/database.
+
+Desktop mode stores state under `%LOCALAPPDATA%\SauronSentinel`; browser/CLI mode retains its `--data-dir` option and `sentinel-data` default. Existing repository data is not automatically migrated. The portable package includes runtime code/resources and Python dependencies, while the machine must already provide WebView2. See the [desktop guide](desktop.md).
 
 ## Live monitoring flow
 
@@ -37,7 +43,7 @@ Dashboard lists show at most the most recent 100 records. A local export is boun
 
 ## Local web boundary
 
-The server binds to IPv4 loopback `127.0.0.1`. No command-line option enables a LAN or public bind. Bundled HTML, CSS, and JavaScript avoid external asset requests. Host/Origin validation and a session token protect browser request boundaries. There is no account system, TLS, cloud backend, or remote deployment mode.
+The server binds to IPv4 loopback `127.0.0.1`. No command-line option enables a LAN or public bind. Browser mode uses its requested port; desktop mode chooses an available port. Bundled HTML, CSS, and JavaScript avoid external asset requests. Host/Origin validation and a session token protect browser request boundaries. There is no account system, TLS, cloud backend, or remote deployment mode.
 
 These controls do not isolate data from malicious local processes or another user with access to the workstation. The security model remains a trusted local computer.
 

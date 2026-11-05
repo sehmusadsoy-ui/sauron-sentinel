@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sauron-sentinel"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local Windows security monitoring, telemetry normalization, and explainable detection"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,9 +28,20 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest==9.2.0", "pytest-cov==7.1.0", "ruff==0.17.3", "build==1.6.1"]
+desktop = [
+  "pywebview==6.2.1; sys_platform == 'win32'",
+  "pythonnet==3.2.1; sys_platform == 'win32'",
+]
+desktop-build = [
+  "pyinstaller==6.22.3; sys_platform == 'win32'",
+  "pyinstaller-hooks-contrib==2026.9; sys_platform == 'win32'",
+]
 
 [project.scripts]
 sauron-sentinel = "sauron_sentinel.cli:main"
+
+[project.gui-scripts]
+sauron-sentinel-desktop = "sauron_sentinel.desktop:main"
 
 [project.urls]
 Homepage = "https://github.com/sehmusadsoy-ui/sauron-sentinel"

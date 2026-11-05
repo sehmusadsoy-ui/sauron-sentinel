@@ -23,7 +23,9 @@ Windows records, JSONL input, and TOML configuration are treated as data. The co
 
 ## Local data and retention
 
-The default database is `sentinel-data/sentinel.db`. Events, alerts, evidence snapshots, and exports are plaintext. There is no application-managed encryption, tamper seal, or evidentiary signing. Rely on suitable local file permissions and disk protection. Do not commit the database, run directories, or real captures to Git; `.gitignore` includes default data locations but cannot know every custom output path.
+Browser/CLI mode defaults to `sentinel-data/sentinel.db`. Desktop mode uses a separate per-user directory under `%LOCALAPPDATA%\SauronSentinel` and does not automatically import a repository's existing database. Events, alerts, evidence snapshots, and exports are plaintext. There is no application-managed encryption, tamper seal, or evidentiary signing. Rely on suitable local file permissions and disk protection. Do not commit the database, run directories, or real captures to Git; `.gitignore` includes default data locations but cannot know every custom output path.
+
+The portable ZIP contains application code/resources and dependencies, not live event history. Its executable is unsigned; published checksums support download comparison but are not publisher signatures. The package does not install services, autostart entries, or shortcuts and does not elevate privileges. Existing WebView2 is required and is not automatically downloaded or installed. Closing the desktop window stops its monitor/server; retained data remains in Local AppData.
 
 The Windows collector includes selected identity/context fields, capped to 256 characters, with truncation marked. It does not store full raw XML/messages. A hashed device label provides a stable local pseudonym, not a strong anonymity guarantee. Arbitrary batch JSONL may contain any allowed attribute strings, so minimize data at the producer and review exports before sharing.
 
@@ -45,6 +47,6 @@ An unhealthy channel causes retries over the configured rolling lookback, while 
 
 ## Supply chain
 
-The runtime uses the Python standard library. Build/development tools are pinned at the top level in `pyproject.toml`; transitive tooling dependencies are not locked. Actions use full commit pins, read-only permissions, and no retained checkout credentials. CI needs no user-provided secrets and does not publish to a package registry.
+The core runtime uses the Python standard library. Optional desktop support adds pywebview and Windows interoperability dependencies and uses Microsoft's installed WebView2 Runtime. Desktop packaging bundles the Python/application dependencies with PyInstaller. Top-level GUI/build/development dependencies are pinned in `pyproject.toml`; transitive dependencies are not locked. Actions use full commit pins, read-only repository permissions, and no retained checkout credentials. CI needs no user-provided secrets and does not publish to a package registry or release automatically.
 
 See [SECURITY.md](../SECURITY.md) for responsible reporting.

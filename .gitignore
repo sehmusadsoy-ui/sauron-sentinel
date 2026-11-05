@@ -11,6 +11,11 @@ htmlcov/
 coverage.xml
 build/
 dist/
+outputs/
+desktop-dist/
+desktop-build/
+*.exe
+*.zip
 sentinel-output/
 demo-output/
 sentinel-data/

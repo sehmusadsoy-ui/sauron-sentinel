@@ -43,7 +43,7 @@ Content identity is not a signature. Neither the hash nor the `source`, `device_
 
 ## Output files
 
-This section describes `run` and `demo` batch output. Live monitoring instead persists retained events, alerts, and evidence snapshots in `sentinel-data/sentinel.db`. `collect-windows` writes an event snapshot and a summary with per-channel availability.
+This section describes `run` and `demo` batch output. Browser/CLI live monitoring defaults to `sentinel-data/sentinel.db`; desktop mode uses its separate `%LOCALAPPDATA%\SauronSentinel` directory. Both persist retained events, alerts, and evidence snapshots. `collect-windows` writes an event snapshot and a summary with per-channel availability.
 
 | File | Contents |
 | --- | --- |

@@ -14,4 +14,6 @@ The runtime reads selected local Windows Event Logs or JSONL input. Live monitor
 
 The local dashboard has no account authentication or TLS and assumes a trusted workstation. Host/Origin checks and a session token protect browser boundaries; other local software/users may still access data. Do not forward its port or place it behind a public proxy.
 
+The optional Windows desktop host displays the same loopback application using existing WebView2. Closing its window stops monitoring; its plaintext history remains under `%LOCALAPPDATA%\SauronSentinel`. The portable archive contains application files rather than personal monitoring data. It is unsigned, does not elevate itself, and does not install a runtime, service, autostart entry, or desktop shortcut automatically.
+
 Databases, evidence, and exports contain plaintext telemetry. Windows collection selects limited fields, but account/service names and threat labels can still be sensitive. Choose access-controlled storage, keep real captures out of Git, and review exports before sharing. The [security model](docs/security-model.md) explains trust boundaries and remaining limitations.

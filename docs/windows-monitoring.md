@@ -2,7 +2,9 @@
 
 ## Start and stop
 
-Double-click `start-sentinel.cmd`, or run `Start-Sentinel.ps1` from PowerShell. The application uses the current account, opens a local browser dashboard, and keeps monitoring while the terminal remains open. Press Ctrl+C to stop.
+For the portable desktop edition, extract the ZIP and open `SauronSentinel.exe`; closing the window stops monitoring. Its separate Local AppData history and WebView2 requirement are described in the [desktop guide](desktop.md).
+
+For source/browser mode, double-click `start-sentinel.cmd`, or run `Start-Sentinel.ps1` from PowerShell. It uses the current account, opens a local browser dashboard, and keeps monitoring while the terminal remains open. Press Ctrl+C to stop.
 
 For a manual launch after installation:
 

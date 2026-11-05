@@ -16,6 +16,13 @@ This document separates shipped behavior from proposals. Milestones are acceptan
 - Windows launcher with project-local setup and no automatic elevation or policy changes.
 - Permission, empty-source, cap, and late-event reporting; zero alerts remain an honest result.
 
+## 0.3 — Portable Windows desktop
+
+- Optional native application window using the existing local dashboard and WebView2 Runtime.
+- Portable Windows x64 folder/ZIP with Python dependencies included, plus checksums and license notices.
+- Per-user data outside the package, a single-instance boundary, and clean window-close shutdown.
+- Manual Windows package-build workflow; unsigned early release with no installer, autostart, or automatic runtime installation.
+
 ## Next — Hardware contracts and controlled captures
 
 RF Canvas, CSI Radar, and LabMate remain proposed targets involving Flipper Zero and ESP32 where applicable. None has a completed integration in this repository.

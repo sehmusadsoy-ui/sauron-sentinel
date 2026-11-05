@@ -5,4 +5,5 @@ recursive-include docs *.md
 recursive-include examples *.jsonl *.toml
 recursive-include tests *.py
 recursive-include scripts *.py
+recursive-include packaging *.spec *.txt *.md
 recursive-include src/sauron_sentinel *.jsonl *.toml *.ps1 *.html *.css *.js

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-05
+
+- Added an optional Windows desktop window using pywebview and the existing WebView2 Runtime, with an automatically chosen loopback port.
+- Added a per-user instance lock, persistent Local AppData storage, and monitor/server cleanup when the window closes.
+- Added a windowed folder-based PyInstaller build, portable ZIP/checksums/manifests, and third-party notices. Python is bundled for target computers; WebView2 remains a system prerequisite.
+- Added a separate manual Windows packaging workflow. Core CLI dependencies remain unchanged, with desktop/build dependencies available as optional extras.
+- Preserved existing repository databases without automatic migration; portable artifacts exclude live event history. Hardware integration remains future work.
+
 ## 0.2.0 — 2026-11-05
 
 - Added real read-only collection of selected Windows System, Security, and Defender events, with truthful per-channel availability and capped-result reporting.
