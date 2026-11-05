@@ -35,14 +35,20 @@ jobs:
           "version=$packageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Build and verify portable package
         run: python scripts/build_desktop.py
+      - name: Resolve artifact directory
+        id: artifacts
+        shell: pwsh
+        run: |
+          $artifactDirectory = (Resolve-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE '..\outputs')).Path
+          "directory=$artifactDirectory" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Upload package and verification manifests
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64
           path: |
-            ${{ github.workspace }}/../outputs/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64.zip
-            ${{ github.workspace }}/../outputs/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64/SHA256SUMS.txt
-            ${{ github.workspace }}/../outputs/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64/build-manifest.json
+            ${{ steps.artifacts.outputs.directory }}/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64.zip
+            ${{ steps.artifacts.outputs.directory }}/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64/SHA256SUMS.txt
+            ${{ steps.artifacts.outputs.directory }}/Sauron-Sentinel-${{ steps.package.outputs.version }}-Windows-x64/build-manifest.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

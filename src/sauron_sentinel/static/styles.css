@@ -22,7 +22,7 @@ button, input, select, textarea { font: inherit; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a, select { touch-action: manipulation; }
 button { cursor: pointer; }
-button:disabled { cursor: wait; opacity: .7; }
+button:disabled { cursor: default; opacity: .7; }
 a { color: inherit; }
 button, select, input, textarea { color: var(--text); }
 button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--teal); outline-offset: 4px; }
