@@ -185,7 +185,7 @@ def archive_bundle(bundle: Path, destination: Path) -> None:
 def copy_notices(repository: Path, bundle: Path) -> None:
     shutil.copyfile(repository / "LICENSE", bundle / "LICENSE.txt")
     notices = [
-        "Sauron Sentinel 0.3.0 - third-party components",
+        "Sauron Sentinel 0.4.0 - third-party components",
         "",
         "Python and the bundled libraries retain their respective licenses.",
         "Available license texts are included under third-party-licenses.",
@@ -216,18 +216,31 @@ def copy_notices(repository: Path, bundle: Path) -> None:
         shutil.copyfile(python_license, target)
     (bundle / "THIRD-PARTY-NOTICES.txt").write_text("\n".join(notices) + "\n", encoding="utf-8")
     (bundle / "README-TR.txt").write_text(
-        "SAURON SENTINEL 0.3.0\n\n"
+        "SAURON SENTINEL 0.4.0\n\n"
         "1. ZIP dosyasının tamamını bir klasöre çıkar.\n"
         "2. SauronSentinel.exe dosyasını çift tıklayarak aç.\n"
-        "3. Pencereyi kapattığında izleme durur.\n\n"
+        "3. İlk açılışta kaynakların erişim durumuna ve son kontrol zamanına bak.\n"
+        "   Erişilebilir bir kaynak, bilgisayarın güvenli olduğunu kanıtlamaz.\n"
+        "4. Bir alarmı açıp kanıtını, açıklamasını ve güvenli kontrol önerilerini incele.\n"
+        "   İstersen İncelendi veya Beklenen olarak işaretle ve kısa bir not ekle.\n"
+        "   Alarm olmaması veya kaynakta seçili olay bulunmaması geçerli bir sonuçtur.\n"
+        "5. Bildirimler başlangıçta kapalıdır. Ayarlardan açabilir, en düşük önem\n"
+        "   düzeyini ve kontrol aralığını seçebilirsin. Deneme bildirimi alarm değildir.\n"
+        "   Windows bildirimleri gizleyebilir; bildirim kuyruğu teslim kanıtı değildir.\n"
+        "6. Pencereyi kapattığında izleme ve bildirimler durur.\n\n"
         "_internal klasörünü EXE dosyasının yanında tut. Python kurmak gerekmez.\n"
         "Gereksinimler: Windows 10/11 x64, .NET Framework ve Microsoft Edge WebView2 Runtime.\n"
         "WebView2 eksikse resmi Microsoft WebView2 Runtime yükleyicisini kullan.\n"
         "Program normal kullanıcı olarak açılır; yönetici izni veya otomatik başlatma ayarı yapmaz.\n"
         "Security günlüğü için ek izin gerekebilir; erişim durumu panelde gösterilir.\n"
+        "Eksik, erişilemeyen, sınıra ulaşan veya güncel olmayan kaynakları ayrıca kontrol et.\n"
+        "Başlangıçta eski kayıtlar incelenir; bunlar yeni Windows bildirimi oluşturmaz.\n"
         "Veriler kullanıcıya ait LocalAppData/SauronSentinel alanında saklanır.\n"
+        "Notlar, inceleme durumları ve ayarlar bu bilgisayarda saklanır.\n"
+        "Dışa aktarmadan önce dosyadaki kişisel bilgileri gözden geçir.\n"
         "Bu paket gerçek günlük, kullanıcı verisi veya önceden doldurulmuş alarm içermez.\n"
-        "Donanım bağlantıları bu sürümde etkin değildir.\n\n"
+        "RF Canvas, CSI Radar ve LabMate bağlantıları yalnızca planlanmıştır.\n"
+        "Bu araç seçili Windows kayıtlarını inceler; tüm güvenlik olaylarını kapsamaz.\n\n"
         "Kaynak kod: https://github.com/sehmusadsoy-ui/sauron-sentinel\n",
         encoding="utf-8",
     )
@@ -257,12 +270,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Install the pinned desktop and desktop-build extras before building")
     with (repository / "pyproject.toml").open("rb") as stream:
         version = tomllib.load(stream)["project"]["version"]
-    if version != "0.3.0":
+    if version != "0.4.0":
         parser.error(
             "Update packaging/version_info.txt and the portable notes before changing the release version"
         )
     workspace = repository.parent
-    build = checked_child(workspace / "work" / "desktop-build", workspace / "work")
+    build = checked_child(workspace / "work" / f"desktop-build-{version}", workspace / "work")
     output = checked_child(
         workspace / "outputs" / f"Sauron-Sentinel-{version}-Windows-x64", workspace / "outputs"
     )

@@ -55,6 +55,12 @@ An alert's `event_ids` link back to normalized events, allowing a reviewer to in
 
 The output directory must not already exist. A processing failure may leave partial files for inspection; a nonzero command result means the run must not be treated as complete. Keep incomplete output separate from successful evidence exports.
 
+## Live local metadata
+
+Live state and JSON exports add `review` and `unread` to alert presentation objects. A review contains `status` (`new`, `reviewed`, or `expected`), `note`, and nullable `updated_at`; unread is an independent Boolean. These fields are local operator metadata, not normalized event attributes or rule input. Batch alert output and stored raw alert/evidence payloads are unchanged. The evidence endpoint returns the raw `alert` and `events` alongside separate `explanation`, `review`, and `unread` fields; reading it alone does not mark an alert read.
+
+Live export also includes local monitor/source health, preferences, and notification-attempt state. It is a bounded retained snapshot (up to 10,000 events and 2,000 alerts), not a complete audit archive or proof of native delivery. Notes and event context can be sensitive plaintext. See [rules](rules.md) for review bounds and [architecture](architecture.md) for schema-2 storage/migration and retention semantics.
+
 ## Producer guidance
 
 - Use UTC at the source when possible, and synchronize device clocks before merging streams.

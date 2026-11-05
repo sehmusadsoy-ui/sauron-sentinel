@@ -1,10 +1,10 @@
 # Architecture
 
-Sauron Sentinel v0.3.0 has three entry paths: a portable Windows desktop window, persistent local browser monitoring, and a strict JSONL batch-analysis CLI. All share the normalized event contract and declarative rule engine. None acquires radio data or authenticates external sensors.
+Sauron Sentinel v0.4.0 is an early usability preview with three entry paths: a portable Windows desktop window, persistent local browser monitoring, and a strict JSONL batch-analysis CLI. All share the normalized event contract and declarative rule engine. None acquires radio data or authenticates external sensors. The [validation record](validation-v0.4.md) states the limits of the recorded checkpoint.
 
 ## Desktop lifecycle
 
-The optional pywebview host opens the bundled dashboard through EdgeChromium/WebView2. It starts the existing monitor/server on a dynamically selected IPv4 loopback port. A per-user instance lock prevents two desktop copies from intentionally opening the same data directory. Window closure stops monitoring and closes the local server/database.
+The optional pywebview host opens the bundled dashboard through EdgeChromium/WebView2. It starts the existing monitor/server on a dynamically selected IPv4 loopback port. A per-user instance lock prevents two desktop copies from intentionally opening the same data directory. Window closure stops monitoring and notifications and closes the local server/database. The notification icon belongs to this window's lifecycle; there is no background service or autostart registration.
 
 Desktop mode stores state under `%LOCALAPPDATA%\SauronSentinel`; browser/CLI mode retains its `--data-dir` option and `sentinel-data` default. Existing repository data is not automatically migrated. The portable package includes runtime code/resources and Python dependencies, while the machine must already provide WebView2. See the [desktop guide](desktop.md).
 
@@ -40,6 +40,18 @@ On restart, and during recovery after a processing failure, the engine replays r
 Correlation beyond retained history is not durable. Event IDs prevent duplicate insertion while their records remain in the database; retention means this is not an unlimited exactly-once guarantee. SQLite errors are reported concisely by the CLI without automatically deleting or resetting an existing database.
 
 Dashboard lists show at most the most recent 100 records. A local export is bounded to 10,000 events and 2,000 alerts. An export is a snapshot of retained data, not a promise that every Windows event was collected.
+
+SQLite `user_version` 0/1 upgrades transactionally to schema 2 with additive metadata tables. Existing alert payloads and evidence snapshots are not rewritten. Reviews store `new`/`reviewed`/`expected`, an optional 500-Unicode-character note, and an update time per alert. Preference payloads use strict schema 1: notifications off, medium minimum severity, and a 15-second interval by default. Invalid saved preferences reset to these defaults with an explicit `reset_invalid` status. Review and notification rows are pruned when their alert is pruned.
+
+Unread flags are separate from review state and persist across restarts. Existing alerts and restart/recovery matches are read by default. The initial collection establishes a read baseline even when access is partial. Only newly inserted later alerts at or after session start become unread. The dashboard performs an explicit idempotent read POST after evidence has loaded; evidence GETs and review saves do not mark an alert read. Live state/export alert objects add `review` and `unread`; the evidence endpoint returns those alongside the unchanged raw alert/events and a separate versioned explanation. This local metadata is not rule input or an allowlist.
+
+## Health and notification state
+
+Health is computed from the current monitor session, not a stored security assessment. Expected channels with no result remain pending. Successful empty queries, unavailable sources, errors, and result caps remain distinct. `ready` requires all configured channels to report successful uncapped queries; it cannot establish complete auditing or security. `last_attempt_at` and `last_scan_at` describe the attempted/completed scan's start, while source `last_success_at` is the successful query completion time for this session. Failed/stopped monitoring marks prior source results non-current; connection loss is also surfaced by the dashboard.
+
+Direct CLI monitoring accepts an optional interval: omitted means the saved preference, explicit means validate and persist an integer from 5 through 3,600 seconds. Preference changes wake the monitor and apply the saved interval. The PowerShell launcher supplies its own explicit interval (15 by default).
+
+Desktop notifications use a Windows Forms `NotifyIcon` and timer on the existing window's GUI thread. The adapter queues/coalesces only two kinds of fixed generic text, regular and clearly labeled test; evidence, identifiers, and notes never cross into shell text. Initial history, historical arrivals, and replay do not notify. Later eligible bundled alerts require opt-in, severity eligibility, and an available adapter. A durable per-alert attempt claim is committed before calling the adapter and is never retried after failure or restart. This favors preventing duplicate notifications over guaranteed delivery. `queued` is queue acceptance, not a delivery receipt; Windows may suppress a notification. Browser mode has no native adapter. The test action requires opt-in and creates no alert.
 
 ## Local web boundary
 

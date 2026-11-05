@@ -3,10 +3,13 @@
 import importlib.util
 import struct
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
 import pytest
+
+from sauron_sentinel import __version__
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
@@ -22,6 +25,25 @@ def _script(name):
 def builder(monkeypatch):
     monkeypatch.syspath_prepend(str(SCRIPTS))
     return _script("build_desktop")
+
+
+def test_release_versions_match_runtime_resources_and_portable_notes(builder, tmp_path):
+    repository = SCRIPTS.parent
+    metadata = tomllib.loads((repository / "pyproject.toml").read_text(encoding="utf-8"))
+    assert metadata["project"]["version"] == __version__ == "0.4.0"
+    resource = (repository / "packaging" / "version_info.txt").read_text(encoding="utf-8")
+    numeric_version = tuple(int(part) for part in __version__.split(".")) + (0,)
+    assert f"filevers={numeric_version}" in resource
+    assert f"prodvers={numeric_version}" in resource
+    assert f"StringStruct('FileVersion', '{__version__}')" in resource
+    assert f"StringStruct('ProductVersion', '{__version__}')" in resource
+    builder.copy_notices(repository, tmp_path)
+    assert f"SAURON SENTINEL {__version__}" in (tmp_path / "README-TR.txt").read_text(
+        encoding="utf-8"
+    )
+    assert f"Sauron Sentinel {__version__} - third-party components" in (
+        tmp_path / "THIRD-PARTY-NOTICES.txt"
+    ).read_text(encoding="utf-8")
 
 
 def test_icon_is_a_complete_multiresolution_windows_icon():

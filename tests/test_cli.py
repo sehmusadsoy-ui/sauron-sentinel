@@ -36,7 +36,7 @@ def test_demo_is_reproducible_and_explicitly_synthetic(tmp_path):
         assert result.returncode == 0, result.stderr
         summary = json.loads(result.stdout)
         assert summary["schema_version"] == 1
-        assert summary["version"] == "0.3.0"
+        assert summary["version"] == "0.4.0"
         assert summary["status"] == "complete"
         assert summary["events_processed"] > 0
         assert summary["synthetic_events"] == summary["events_processed"]
@@ -138,7 +138,7 @@ def test_help_and_version_are_available(tmp_path):
     assert command(tmp_path, "--help").returncode == 0
     result = command(tmp_path, "--version")
     assert result.returncode == 0
-    assert "0.3.0" in result.stdout
+    assert "0.4.0" in result.stdout
 
 
 def test_module_entrypoint_smoke(tmp_path):
@@ -151,7 +151,7 @@ def test_module_entrypoint_smoke(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.3.0"
+    assert result.stdout.strip() == "0.4.0"
 
 
 def test_excessive_toml_nesting_produces_no_cli_traceback(tmp_path):

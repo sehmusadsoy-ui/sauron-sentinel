@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 preview — 2026-11-06
+
+- Added first-use guidance and source-health explanations that distinguish unavailable, empty, partial, and healthy collection results.
+- Added a Turkish explanation catalog for all 10 bundled rules, with evidence, limitations, and suggested investigation steps.
+- Added persistent per-alert review states (`new`, `reviewed`, `expected`) and notes of up to 500 Unicode characters. Review state is separate from the unread count.
+- Added schema-1 local preferences for notifications, minimum severity, and the scan interval. Defaults are notifications off, medium severity, and 15 seconds; interval changes persist across restarts.
+- Added an additive SQLite 0/1→2 migration for preferences and unread/notification metadata while preserving existing reviews, raw alerts, and evidence.
+- Added opt-in Windows native notification attempts with fixed generic text that excludes event details. Queue acceptance does not prove display; Windows may suppress delivery. Historical/replayed alerts do not produce a notification storm.
+- Kept notifications tied to the open desktop window; closing it stops monitoring, the local server, and notification resources.
+- Automated local validation passed (449 tests, 1 expected Windows symlink skip; 93.61% branch-measured coverage). CI outcomes belong to the candidate's run record. The native GUI, notification delivery, clean-machine startup, and controlled Windows alert scenarios remain unverified by the read-only checkpoint.
+
 ## 0.3.0 — 2026-11-05
 
 - Added an optional Windows desktop window using pywebview and the existing WebView2 Runtime, with an automatically chosen loopback port.

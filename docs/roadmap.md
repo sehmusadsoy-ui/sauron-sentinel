@@ -23,6 +23,18 @@ This document separates shipped behavior from proposals. Milestones are acceptan
 - Per-user data outside the package, a single-instance boundary, and clean window-close shutdown.
 - Manual Windows package-build workflow; unsigned early release with no installer, autostart, or automatic runtime installation.
 
+## 0.4 preview — Usability and local review
+
+- First-use guidance and source-health explanations, including unavailable, empty, partial, and healthy collection results.
+- A Turkish explanation catalog covering all 10 bundled rules, their evidence, limitations, and investigation steps.
+- Persistent per-alert `new`, `reviewed`, and `expected` review states, plus notes of up to 500 Unicode characters. The unread count remains separate.
+- Schema-1 preferences with notifications off, minimum severity medium, and a 15-second scan interval by default; interval changes persist across restarts.
+- Additive SQLite 0/1→2 migration for preferences and unread/notification metadata that preserves existing reviews, raw alerts, and evidence.
+- Opt-in, window-scoped Windows native notification attempts using fixed generic text without event details. Queue acceptance does not prove Windows delivery, and historical/replayed alerts do not create a notification storm.
+- Closing the desktop window stops monitoring, the local server, and notification resources.
+
+Automated local validation passed (449 tests, 1 expected Windows symlink skip; 93.61% branch-measured coverage). CI outcomes belong to the candidate's run record. Native GUI behavior, notification delivery, clean-machine startup, and controlled Windows alert scenarios remain unverified by the read-only checkpoint. The frozen headless diagnostic checks bundled resources, native library imports, storage, the loopback server, and shutdown; it does not validate the real application window or notification display.
+
 ## Next — Hardware contracts and controlled captures
 
 RF Canvas, CSI Radar, and LabMate remain proposed targets involving Flipper Zero and ESP32 where applicable. None has a completed integration in this repository.

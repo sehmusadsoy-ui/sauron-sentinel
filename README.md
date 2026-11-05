@@ -8,13 +8,15 @@
 
 Sauron Sentinel is a local Windows security-monitoring application with a Turkish desktop window, a read-only Windows Event Log collector, persistent SQLite storage, and an explainable rule engine. It shows real observations from the current computer, source availability, and alerts backed by event evidence. The same dashboard is also available through the local browser/CLI mode.
 
-**Version 0.3.0 adds a portable Windows desktop edition.** Its ZIP includes Python and application dependencies, so the target computer does not need a Python installation. The desktop window uses an existing Microsoft WebView2 Runtime. The core monitoring/CLI runtime still uses the Python standard library; desktop support is an optional dependency group.
+**Version 0.4.0 is an early usability preview.** It adds first-use source guidance, explanations for all ten bundled heuristics, per-alert review notes, persistent preferences, and optional Windows desktop notifications. See the [validation record](docs/validation-v0.4.md) for the read-only checkpoint and the native/manual checks it does not establish. Published assets and their actual verification status belong to the release record.
+
+The portable ZIP includes Python and application dependencies, so the target computer does not need a Python installation. The desktop window uses an existing Microsoft WebView2 Runtime. The core monitoring/CLI runtime still uses the Python standard library; desktop support is an optional dependency group.
 
 RF Canvas, CSI Radar, and LabMate remain **future integration targets**. No Flipper Zero/ESP32 firmware, serial collector, RF capture, or CSI processing is implemented in this release.
 
 ## Portable Windows app
 
-1. Get `Sauron-Sentinel-0.3.0-Windows-x64.zip` from the [release assets](https://github.com/sehmusadsoy-ui/sauron-sentinel/releases).
+1. Obtain the complete `Sauron-Sentinel-0.4.0-Windows-x64.zip` preview archive when available from [release assets](https://github.com/sehmusadsoy-ui/sauron-sentinel/releases).
 2. Extract the whole ZIP to a folder you can access.
 3. Open the extracted `SauronSentinel` folder and double-click **`SauronSentinel.exe`**.
 
@@ -51,11 +53,25 @@ The launcher does not request administrator access or change Windows audit or Po
 - Local event and alert history retained in SQLite across restarts.
 - Rule matches with event references, rather than invented incidents or a simulated attack counter.
 
-The first poll looks back 24 hours by default; subsequent polls refresh the local view. The default polling interval is 15 seconds. System lifecycle records can provide useful real observations even when security-specific channels are unavailable. **Zero alerts is a valid result.** Sentinel does not generate test attacks or fabricate events to populate the dashboard.
+The first-use health panel explains which sources can be read, which are unavailable or missing, and whether a result cap was reached. An accessible empty source is a successful read with no selected matches; it does not prove auditing is enabled. Previous results remain visibly stale after a failed/stopped monitor or a lost dashboard connection. Attempt/scan start and per-source last successful read times describe the current session; health is not a persisted security score. **Readable sources do not prove the computer is secure.**
+
+The first poll looks back 24 hours by default; subsequent polls refresh the local view. The initial polling preference is 15 seconds. System lifecycle records can provide useful real observations even when security-specific channels are unavailable. **Zero alerts is a valid result.** Sentinel does not generate test attacks or fabricate events to populate the dashboard. Search and severity filters apply only to the most recent 100 events/alerts loaded in the dashboard, not the full retained history.
 
 Healthy polls use a 120-second overlap. If any source is unavailable or fails, monitoring retries the configured rolling lookback until all sources are healthy, still subject to per-channel result caps. Late observations appear in the timeline immediately but are skipped by the current detection pass; chronological replay on restart or recovery can add historical alerts from retained records.
 
 Windows may restrict Security or Defender log access for the current account. Missing audit configuration, disabled channels, and an empty selected-event window can also affect results. Sentinel reports these conditions; it does not elevate itself or alter logging settings. See [Windows monitoring](docs/windows-monitoring.md).
+
+## Review, preferences, and notifications
+
+Open an alert to read its evidence, matching conditions, possible benign causes, and safe checks. The explanation catalog covers all ten bundled rules; RF and motion examples remain offline schema demonstrations. An unknown rule receives cautious generic guidance. Explanations do not change raw alert or evidence records.
+
+Each alert has a local review state: `new`, `reviewed`, or `expected`, with an optional note of at most 500 Unicode characters. The choice applies only to that alert and never suppresses later similar matches. Notes and review times persist across restarts. **Unread and review are separate:** opening evidence successfully triggers an explicit mark-as-read request; changing review state does not mark it read. A failed read update remains visible and can be retried.
+
+Preferences persist in the same local store. Defaults are notifications **off**, minimum severity **medium**, and a **15-second** scan interval. The dashboard offers 15, 30, 60, or 300 seconds and preserves a valid saved custom interval. The direct `serve` command reuses the saved interval when `--interval` is omitted; an explicit integer from 5 through 3,600 changes and saves it. The PowerShell launcher always passes its `-Interval` value, which defaults to 15, and therefore saves that override.
+
+Native notifications are optional and available only while the desktop window and its notification adapter are running. Initial history, the first collection batch (even with partial access), historical arrivals, and restart/recovery replay do not generate new unread/notification storms. Later eligible alerts become unread independently of the notification preference. After explicit opt-in, an eligible alert at or above the selected severity can request a fixed generic Windows notification with no event, account, service, or note content. A durable attempt claim prevents repeats after restart; a failed or interrupted attempt is not retried. `queued` means accepted by the application queue, **not delivered**; Windows may suppress display. The test control is clearly labeled as a test, creates no alarm, and also requires opt-in.
+
+The notification icon supports the open window; it is not a tray-resident background service. Closing the window stops monitoring, notifications, and the local server. Browser mode retains in-app unread/review features but reports native notifications unavailable.
 
 ## Capabilities
 
@@ -68,8 +84,9 @@ Windows may restrict Security or Defender log access for the current account. Mi
 | JSONL analysis | Streaming file/stdin ingestion with strict schema validation |
 | Normalization | UTC timestamps, explicit synthetic provenance, deterministic event IDs |
 | Detection | TOML rules, typed comparisons, grouped event-time thresholds, cooldowns |
-| Evidence | Alert references and evidence snapshots; JSONL batch exports |
-| Verification | Automated tests, Windows/Ubuntu CI, wheel and source-distribution checks |
+| Evidence and review | Immutable alert evidence, explanation catalog, persistent per-alert status/notes, separate unread flags |
+| Preferences | Local schema-1 preferences and optional window-scoped Windows notification attempts |
+| Verification | Automated tests and CI configuration; separate native/manual release gates |
 
 This is an early heuristic monitoring tool, not a calibrated intrusion detector, endpoint protection replacement, or production SIEM. A matched rule is a reason to investigate, not proof of compromise.
 
@@ -91,7 +108,7 @@ sauron-sentinel --version
 Start live monitoring on Windows:
 
 ```sh
-sauron-sentinel serve --port 8765 --data-dir sentinel-data --interval 15 --lookback-hours 24 --open-browser
+sauron-sentinel serve --port 8765 --data-dir sentinel-data --lookback-hours 24 --open-browser
 ```
 
 The dashboard listens only on `127.0.0.1`; LAN/public binding is not supported. Local history is stored under `sentinel-data`. Stop the process before moving or removing that directory. Keep its contents private and out of Git.
@@ -106,6 +123,8 @@ sauron-sentinel-desktop
 The desktop edition selects an available loopback port automatically and uses the per-user data directory described above. It enforces one running desktop instance for that user data location.
 
 Restart/recovery replay saves previously missing alert matches without overwriting existing alert records. This also recovers a stop between committing an event and saving its alert, as long as the event is retained. A database-access error is reported without automatically resetting the existing database.
+
+Existing supported SQLite schema 0/1 stores upgrade transactionally to schema 2 by adding local review/preferences/unread/notification metadata. Existing alert payloads and evidence are preserved; pre-existing alerts start read. Stop Sentinel and keep a private backup before upgrading a store you need to retain.
 
 Collect a one-time Windows snapshot without starting the dashboard:
 
@@ -169,7 +188,7 @@ Read the [architecture](docs/architecture.md), [Windows collector guide](docs/wi
 
 - Runtime monitoring stays on the local machine. It performs no active scanning, radio transmission, automatic response, or telemetry upload.
 - The local dashboard has no user-account system or TLS. Loopback binding is a deployment boundary, not protection against other software or users already on the computer.
-- Events can contain account names, service names, threat labels, and other sensitive context. Local database and export files are plaintext; review data before sharing it.
+- Events can contain account names, service names, threat labels, and other sensitive context. Local database, review notes, and export files are plaintext; review data before sharing it. Live exports add review/unread metadata and local state without rewriting raw alert/evidence records.
 - Selected event IDs and per-channel result limits mean collection is not a complete Windows audit archive. Source status flags possible capped results.
 - Missing permissions and missing logs remain visible limitations. The application does not grant itself access, change audit policy, or manufacture replacement data.
 - There are no validated RF Canvas, CSI Radar, LabMate, Flipper Zero, or ESP32 integrations.
@@ -187,7 +206,7 @@ python -m pytest --cov --cov-report=term-missing
 python -m build
 ```
 
-CI tests Windows and Ubuntu with Python 3.11 and 3.14, enforces branch coverage, and smoke-tests an installed wheel. Host-specific collection tests use synthetic operating-system responses; a live smoke check separately verifies the current computer's accessible channels. Coverage is not a real-world detection-accuracy metric.
+CI is configured for Windows and Ubuntu with Python 3.11 and 3.14, branch coverage, and an installed-wheel smoke test. On 2026-11-06, the Phase 5 local source check passed **449 tests, with 1 expected Windows symlink skip and 93.61% branch-measured coverage**, plus Ruff lint/format, JavaScript syntax, and the Phase 2/3 DOM checks. This does not establish that every candidate CI job passed. The [read-only validation record](docs/validation-v0.4.md) preserves the earlier inherited 448-test checkpoint and actual partial access on the current PC with deduplication/replay evidence. That checkpoint does not establish controlled Windows scenarios, clean-machine installation, or native GUI/Save As/notification appearance and lifecycle. Host-specific unit tests use synthetic operating-system responses. Coverage is not a real-world detection-accuracy metric.
 
 Core monitoring and CLI code use the standard library. The optional desktop edition uses pywebview, Python/.NET interoperability, and Microsoft's installed WebView2 Runtime. Desktop build tools and top-level development dependencies are pinned in `pyproject.toml`; pip resolves transitive dependencies. The separate manual Windows packaging workflow builds a portable artifact without collecting live user data. Actions use full commit pins and read-only repository permissions. Dependabot proposes updates.
 
