@@ -4,6 +4,8 @@
   const node = (id) => document.getElementById(id);
   const token = document.querySelector('meta[name="sentinel-token"]')?.content || "";
   const severityNames = { critical: "Kritik", high: "Yüksek", medium: "Orta", low: "Düşük" };
+  const reviewNames = { new: "Yeni", reviewed: "İncelendi", expected: "Beklediğim işlem" };
+  const reviewNoteLimit = 500;
   const alertNames = {
     "auth-failure-burst": "Art arda başarısız oturum açma",
     "windows-service-installed": "Yeni Windows hizmeti kuruldu",
@@ -70,7 +72,11 @@
     logon_type: "Oturum türü", status: "Durum", action: "İşlem", computer: "Bilgisayar",
     service_type: "Hizmet türü", start_type: "Başlangıç türü", old_start_type: "Önceki başlangıç türü", group_name: "Grup",
   };
-  const state = { data: null, fetching: false, scanning: false, evidenceRequest: 0, renderedEvents: "", renderedAlerts: "", renderedSources: "" };
+  const state = {
+    data: null, fetching: false, scanning: false, evidenceRequest: 0, activeEvidence: null,
+    evidenceReturnId: null, reviewRevision: 0, reviewOverrides: new Map(), pendingReviews: new Map(),
+    renderedEvents: "", renderedAlerts: "", renderedSources: "",
+  };
   const numberFormat = new Intl.NumberFormat("tr-TR");
   const timeFormat = new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const dateFormat = new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -125,9 +131,13 @@
           const body = await response.json();
           if (typeof body.error === "string") explanation = body.error;
         } catch { /* Non-JSON failures receive the same useful local message. */ }
-        if (response.status === 403) throw new Error("Oturum doğrulanamadı. Sayfayı yenileyip tekrar dene.");
-        if (response.status === 409) throw new Error("Bir tarama zaten sürüyor. Birkaç saniye sonra yeniden dene.");
-        throw new Error(explanation || `İşlem tamamlanamadı (${response.status}).`);
+        const message = response.status === 403 ? "Oturum doğrulanamadı. Sayfayı yenileyip tekrar dene."
+          : response.status === 409 ? "Bir tarama zaten sürüyor. Birkaç saniye sonra yeniden dene."
+            : explanation || `İşlem tamamlanamadı (${response.status}).`;
+        const error = new Error(message);
+        error.status = response.status;
+        error.code = explanation;
+        throw error;
       }
       return await response.json();
     } finally {
@@ -273,12 +283,16 @@
     const item = element("li", "alert-item");
     const button = element("button", `alert-button ${severity}`);
     button.type = "button";
+    button.dataset.alertId = alert.alert_id;
     const title = alertNames[alert.rule_id] || alert.title || alert.rule_id;
-    button.setAttribute("aria-label", `${title}. Kanıtları incele.`);
+    const review = reviewFor(alert);
+    button.setAttribute("aria-label", `${title}. ${reviewNames[review.status]}. Açıklamayı ve kayıtları incele.`);
     const top = element("div", "alert-topline");
     const time = element("time", "event-time", formatDate(alert.timestamp, dateFormat));
     time.dateTime = alert.timestamp || "";
-    top.append(element("span", `severity-badge ${severity}`, severityNames[severity]), time);
+    const badges = element("div", "alert-badges");
+    badges.append(element("span", `severity-badge ${severity}`, severityNames[severity]), element("span", `review-badge ${review.status}`, reviewNames[review.status]));
+    top.append(badges, time);
     const meta = element("div", "alert-meta");
     const group = alert.group || {};
     meta.append(element("span", "", group.device_id || "Cihaz ayrıntısı kanıtlarda"));
@@ -297,8 +311,8 @@
     const alerts = Array.isArray(state.data.alerts) ? state.data.alerts : [];
     const query = node("search-input").value.trim().toLocaleLowerCase("tr-TR");
     const severity = node("severity-filter").value;
-    const filtered = alerts.filter((alert) => (!severity || alert.severity === severity) && searchMatches([alert, alertNames[alert.rule_id]], query));
-    const fingerprint = JSON.stringify([alerts.map((alert) => alert.alert_id), query, severity]);
+    const filtered = alerts.filter((alert) => (!severity || alert.severity === severity) && searchMatches([{ ...alert, review: reviewFor(alert) }, alertNames[alert.rule_id], reviewNames[reviewFor(alert).status]], query));
+    const fingerprint = JSON.stringify([alerts.map((alert) => [alert.alert_id, reviewFor(alert)]), query, severity]);
     if (state.renderedAlerts === fingerprint) return;
     state.renderedAlerts = fingerprint;
     const fragment = document.createDocumentFragment();
@@ -329,8 +343,13 @@
   async function refresh() {
     if (state.fetching) return;
     state.fetching = true;
+    const reviewRevision = state.reviewRevision;
     try {
       const data = await api("/api/state");
+      // A response requested before a save must not put the previous review back.
+      for (const [alertId, saved] of state.reviewOverrides) {
+        if (saved.revision <= reviewRevision) state.reviewOverrides.delete(alertId);
+      }
       state.data = data;
       const summary = data.summary || {};
       node("events-total").textContent = count(summary.events_total);
@@ -401,20 +420,204 @@
     }
   }
 
+  function validReview(review) {
+    return review && typeof review.status === "string" && Object.hasOwn(reviewNames, review.status) && typeof review.note === "string"
+      && Array.from(review.note).length <= reviewNoteLimit
+      && (review.updated_at === null || typeof review.updated_at === "string");
+  }
+
+  function reviewFor(alert) {
+    const review = state.reviewOverrides.get(alert.alert_id)?.review || alert.review;
+    return validReview(review) ? review : { status: "new", note: "", updated_at: null };
+  }
+
+  function evidenceIsCurrent(request, alertId) {
+    return request === state.evidenceRequest && state.activeEvidence?.alertId === alertId && node("evidence-dialog").open;
+  }
+
+  function reviewNoteError(value) {
+    if (Array.from(value).length > reviewNoteLimit) return "Not en fazla 500 karakter olabilir. Kaydetmek için notu kısalt.";
+    if (/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value.replace(/[\n\t]/g, ""))) return "Notta görünmeyen denetim karakterleri var. Bunları kaldırıp yeniden dene.";
+    return "";
+  }
+
+  function explanationSection(title, content, ordered = false) {
+    const section = element("section", "explanation-section");
+    section.append(element("h3", "", title));
+    if (Array.isArray(content)) {
+      const list = element(ordered ? "ol" : "ul", "explanation-list");
+      for (const item of content) list.append(element("li", "", item));
+      section.append(list);
+    } else {
+      section.append(element("p", "", content));
+    }
+    return section;
+  }
+
+  function explanationFor(alert, explanation) {
+    const content = explanation?.schema_version === 1 && explanation.rule_id === alert.rule_id ? explanation : {};
+    const strings = (values) => Array.isArray(values) ? values.filter((value) => typeof value === "string" && value.trim()) : [];
+    const benign = strings(content.benign_causes);
+    const checks = strings(content.checks);
+    const explanationView = element("div", "alarm-explanation");
+    explanationView.append(
+      explanationSection("Ne oldu?", typeof content.summary === "string" && content.summary ? content.summary : "Bu alarmın açıklaması alınamadı. Erişilebilen dayanak kayıtları aşağıda inceleyebilirsin."),
+      explanationSection("Neden alarm oluştu?", typeof content.why === "string" && content.why ? content.why : "Kuralın eşleşme açıklaması alınamadı. Alarm ve kural bilgilerini aşağıdan kontrol edebilirsin."),
+      explanationSection("Olası normal nedenler", benign.length ? benign : "Bu alarm için olası normal nedenler belirtilmedi."),
+      explanationSection("Ne kontrol edebilirim?", checks.length ? checks : "Olayın saatini ve ilgili kullanıcıyı, o sırada yaptığın işlemlerle karşılaştır. Emin değilsen yetkili birinden destek al.", true),
+    );
+    return explanationView;
+  }
+
+  function reviewForm(alert, review, request) {
+    const section = element("section", "review-section");
+    section.setAttribute("aria-labelledby", "review-title");
+    const heading = element("h3", "", "Bu alarm için değerlendirmen");
+    heading.id = "review-title";
+    section.append(heading, element("p", "review-scope", "Seçimin yalnızca bu alarm için saklanır. Sonraki benzer olaylar yine alarm oluşturabilir."));
+    const form = element("form", "review-form");
+    form.noValidate = true;
+    const statusLabel = element("label", "review-label", "Değerlendirme");
+    statusLabel.htmlFor = "review-select";
+    const select = element("select", "review-select");
+    select.id = "review-select";
+    select.name = "status";
+    for (const [value, name] of Object.entries(reviewNames)) {
+      const option = element("option", "", name);
+      option.value = value;
+      select.append(option);
+    }
+    select.value = review.status;
+    const noteLabel = element("label", "review-label", "Kısa not (isteğe bağlı)");
+    noteLabel.htmlFor = "review-note";
+    const note = element("textarea", "review-note");
+    note.id = "review-note";
+    note.name = "note";
+    note.rows = 3;
+    note.value = review.note;
+    note.setAttribute("aria-describedby", "review-note-help review-note-count review-note-error");
+    const helpRow = element("div", "review-note-help");
+    const help = element("p", "", "En fazla 500 karakter. Not bu bilgisayarda saklanır.");
+    help.id = "review-note-help";
+    const counter = element("output", "review-note-count");
+    counter.id = "review-note-count";
+    counter.htmlFor = note.id;
+    helpRow.append(help, counter);
+    const validation = element("p", "review-error");
+    validation.id = "review-note-error";
+    validation.setAttribute("role", "alert");
+    const actions = element("div", "review-actions");
+    const save = element("button", "button button-primary", "Değerlendirmeyi kaydet");
+    save.type = "submit";
+    const savedAt = element("p", "review-saved-at");
+    const feedback = element("p", "review-feedback");
+    feedback.setAttribute("role", "status");
+    feedback.setAttribute("aria-live", "polite");
+    const failure = element("p", "review-error");
+    failure.setAttribute("role", "alert");
+    actions.append(save, savedAt);
+    form.append(statusLabel, select, noteLabel, note, helpRow, validation, actions, feedback, failure);
+    section.append(form);
+    let savedReview = review;
+    let busy = false;
+    const current = () => evidenceIsCurrent(request, alert.alert_id) && node("evidence-body").contains(form);
+    function update() {
+      const error = reviewNoteError(note.value);
+      counter.textContent = `${count(Array.from(note.value).length)} / 500`;
+      counter.classList.toggle("over-limit", Boolean(error));
+      validation.textContent = error;
+      validation.hidden = !error;
+      note.setAttribute("aria-invalid", error ? "true" : "false");
+      select.disabled = busy;
+      note.disabled = busy;
+      save.disabled = busy || Boolean(error);
+      save.textContent = busy ? "Kaydediliyor…" : "Değerlendirmeyi kaydet";
+      form.setAttribute("aria-busy", busy ? "true" : "false");
+      savedAt.textContent = savedReview.updated_at ? `Son kayıt: ${formatDate(savedReview.updated_at)}` : "Henüz değerlendirme kaydedilmedi.";
+    }
+    const changed = () => {
+      failure.textContent = "";
+      feedback.textContent = select.value !== savedReview.status || note.value !== savedReview.note ? "Değişiklikler henüz kaydedilmedi." : "";
+      feedback.className = "review-feedback";
+      update();
+    };
+    select.addEventListener("change", changed);
+    note.addEventListener("input", changed);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (busy || !current()) return;
+      const payload = { status: select.value, note: note.value };
+      if (!Object.hasOwn(reviewNames, payload.status) || reviewNoteError(payload.note)) {
+        update();
+        note.focus();
+        return;
+      }
+      busy = true;
+      failure.textContent = "";
+      feedback.textContent = "Değerlendirme kaydediliyor…";
+      feedback.className = "review-feedback";
+      update();
+      const operation = api(`/api/alerts/${alert.alert_id}/review`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Token": token }, body: JSON.stringify(payload),
+      });
+      state.pendingReviews.set(alert.alert_id, operation);
+      try {
+        const result = await operation;
+        if (!validReview(result.review)) throw new Error("invalid_review_response");
+        state.reviewRevision += 1;
+        state.reviewOverrides.set(alert.alert_id, { review: result.review, revision: state.reviewRevision });
+        renderAlerts();
+        if (!current()) return;
+        savedReview = result.review;
+        select.value = savedReview.status;
+        note.value = savedReview.note;
+        feedback.textContent = "Değerlendirme kaydedildi.";
+        feedback.className = "review-feedback saved";
+      } catch (error) {
+        if (!current()) return;
+        feedback.textContent = "";
+        failure.textContent = error.status === 403 ? "Oturum doğrulanamadı. Sayfayı yenileyip tekrar dene."
+          : error.status === 404 ? "Bu alarm artık bulunamıyor. Pencereyi kapatıp alarm listesini kontrol et."
+            : error.code === "invalid_review" ? "Değerlendirme kabul edilmedi. Durumu ve en fazla 500 karakterlik notunu kontrol edip yeniden dene."
+              : "Kaydedildiği doğrulanamadı. Notun bu pencerede duruyor; yeniden kaydetmeyi deneyebilirsin.";
+      } finally {
+        if (state.pendingReviews.get(alert.alert_id) === operation) state.pendingReviews.delete(alert.alert_id);
+        if (current()) { busy = false; update(); }
+      }
+    });
+    update();
+    return section;
+  }
+
   async function showEvidence(alert) {
     const dialog = node("evidence-dialog");
     const body = node("evidence-body");
     const request = ++state.evidenceRequest;
+    state.activeEvidence = { alertId: alert.alert_id, request };
+    state.evidenceReturnId = /^[a-f0-9]{64}$/.test(alert.alert_id || "") ? alert.alert_id : null;
+    body.setAttribute("aria-busy", "true");
     body.replaceChildren(element("p", "", "Alarmın dayandığı kayıtlar yükleniyor…"));
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      dialog.showModal();
+      node("evidence-title").focus();
+    }
     if (!/^[a-f0-9]{64}$/.test(alert.alert_id || "")) {
       body.replaceChildren(element("p", "evidence-error", "Bu alarmın kayıt kimliği geçerli değil."));
+      body.removeAttribute("aria-busy");
       return;
     }
     try {
+      // Reopening a saving alert reads the result after that write has settled.
+      const pending = state.pendingReviews.get(alert.alert_id);
+      if (pending) {
+        body.replaceChildren(element("p", "", "Kaydetme tamamlanıyor; alarmın güncel durumu yükleniyor…"));
+        try { await pending; } catch { /* The fresh read also resolves uncertain saves. */ }
+        if (!evidenceIsCurrent(request, alert.alert_id)) return;
+      }
       const data = await api(`/api/alerts/${alert.alert_id}/evidence`);
-      if (request !== state.evidenceRequest || !dialog.open) return;
+      if (!evidenceIsCurrent(request, alert.alert_id)) return;
       const current = data.alert || alert;
+      if (current.alert_id !== alert.alert_id) throw new Error("invalid_evidence_response");
       const events = Array.isArray(data.events) ? data.events : [];
       const grid = element("dl", "details-grid");
       addDetail(grid, "Kural", current.rule_id);
@@ -424,7 +627,16 @@
       addDetail(grid, "Eşleşen kayıt", count(current.matched_count));
       addDetail(grid, "Veri", current.synthetic ? "Sentetik örnek" : "Gerçek Windows kayıtları");
       addDetail(grid, "Alarm kimliği", current.alert_id, true);
-      body.replaceChildren(element("h3", "", alertNames[current.rule_id] || current.title || current.rule_id), grid);
+      const technical = element("details", "evidence-technical");
+      technical.append(element("summary", "", "Alarm ve kural bilgileri"), grid);
+      const review = state.reviewOverrides.get(current.alert_id)?.review || data.review;
+      body.replaceChildren(
+        element("h3", "evidence-alert-title", alertNames[current.rule_id] || current.title || current.rule_id),
+        element("p", "evidence-caution", "Alarm bir kural eşleşmesidir; tek başına saldırı olduğunu göstermez."),
+        explanationFor(current, data.explanation),
+        reviewForm(current, validReview(review) ? review : { status: "new", note: "", updated_at: null }, request),
+        technical,
+      );
       if (events.length < (current.event_ids || []).length) body.append(element("p", "evidence-note", "Bazı kanıt kayıtları bu çalışma alanında artık bulunmuyor. Erişilebilen kayıtlar aşağıda gösteriliyor."));
       body.append(element("h3", "", `Dayanak kayıtlar · ${count(events.length)}`));
       const list = element("ol", "event-list");
@@ -432,17 +644,35 @@
       body.append(list);
       if (!events.length) body.append(element("p", "evidence-note", "Bu alarm için erişilebilir olay kaydı bulunamadı."));
     } catch (error) {
-      if (request !== state.evidenceRequest || !dialog.open) return;
-      body.replaceChildren(element("p", "evidence-error", error.message || "Alarm kayıtları yüklenemedi. Pencereyi kapatıp yeniden dene."));
+      if (!evidenceIsCurrent(request, alert.alert_id)) return;
+      const message = error.status === 403 ? "Oturum doğrulanamadı. Sayfayı yenileyip tekrar dene."
+        : error.status === 404 ? "Bu alarm artık bulunamıyor. Pencereyi kapatıp alarm listesini kontrol et."
+          : "Alarm bilgileri yüklenemedi. Pencereyi kapatıp yeniden dene.";
+      const failure = element("p", "evidence-error", message);
+      failure.setAttribute("role", "alert");
+      body.replaceChildren(failure);
+    } finally {
+      if (evidenceIsCurrent(request, alert.alert_id)) body.removeAttribute("aria-busy");
     }
+  }
+
+  function invalidateEvidence() {
+    state.evidenceRequest += 1;
+    state.activeEvidence = null;
   }
 
   node("scan-button").addEventListener("click", scan);
   node("search-input").addEventListener("input", () => { renderEvents(); renderAlerts(); });
   node("event-kind-filter").addEventListener("change", renderEvents);
   node("severity-filter").addEventListener("change", renderAlerts);
-  node("close-evidence").addEventListener("click", () => node("evidence-dialog").close());
-  node("evidence-dialog").addEventListener("close", () => { state.evidenceRequest += 1; });
+  node("close-evidence").addEventListener("click", () => { invalidateEvidence(); node("evidence-dialog").close(); });
+  node("evidence-dialog").addEventListener("cancel", invalidateEvidence);
+  node("evidence-dialog").addEventListener("close", () => {
+    if (node("evidence-dialog").open) return;
+    invalidateEvidence();
+    const target = [...node("alert-list").querySelectorAll("button")].find((button) => button.dataset.alertId === state.evidenceReturnId);
+    (target || node("alerts-title")).focus();
+  });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   refresh();
   window.setInterval(() => { if (!document.hidden && !state.scanning) refresh(); }, 5000);

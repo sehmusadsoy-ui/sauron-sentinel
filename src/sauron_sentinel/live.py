@@ -10,6 +10,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import unicodedata
 import webbrowser
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .engine import Alert, RuleEngine
+from .explanations import explanation_for
 from .health import build_health
 from .models import Event, ValidationError, format_timestamp, normalize
 from .rules import load_rules
@@ -33,6 +35,33 @@ def _json(value: Any) -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _validate_review(status: Any, note: Any) -> None:
+    if type(status) is not str or status not in {"new", "reviewed", "expected"}:
+        raise ValidationError("Invalid alert review status")
+    if type(note) is not str or len(note) > 500:
+        raise ValidationError("Alert review note must be at most 500 characters")
+    if any(
+        character not in "\n\t" and unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+        for character in note
+    ):
+        raise ValidationError("Alert review note contains control characters")
+
+
+def _review_object(row: tuple | None) -> dict:
+    if row is None or row[0] is None:
+        return {"status": "new", "note": "", "updated_at": None}
+    return {"status": row[0], "note": row[1], "updated_at": row[2]}
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValidationError("Duplicate JSON object key")
+        result[key] = value
+    return result
 
 
 class EventStore:
@@ -48,14 +77,30 @@ class EventStore:
         self._db = sqlite3.connect(directory / "sentinel.db", check_same_thread=False)
         try:
             with self._db:
-                self._db.executescript(
-                    "CREATE TABLE IF NOT EXISTS events ("
-                    "event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL);"
-                    "CREATE INDEX IF NOT EXISTS events_time ON events(timestamp);"
-                    "CREATE TABLE IF NOT EXISTS alerts ("
-                    "alert_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL,"
-                    "evidence TEXT NOT NULL);"
-                    "CREATE INDEX IF NOT EXISTS alerts_time ON alerts(timestamp);"
+                # Explicit BEGIN keeps DDL and the version marker in one transaction.
+                # executescript would commit an existing transaction before running.
+                self._db.execute("BEGIN IMMEDIATE")
+                version = self._db.execute("PRAGMA user_version").fetchone()[0]
+                if version not in (0, 1):
+                    raise sqlite3.DatabaseError("Unsupported local storage schema version")
+                if version == 0:
+                    for statement in (
+                        "CREATE TABLE IF NOT EXISTS events ("
+                        "event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL)",
+                        "CREATE INDEX IF NOT EXISTS events_time ON events(timestamp)",
+                        "CREATE TABLE IF NOT EXISTS alerts ("
+                        "alert_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL,"
+                        "evidence TEXT NOT NULL)",
+                        "CREATE INDEX IF NOT EXISTS alerts_time ON alerts(timestamp)",
+                        "CREATE TABLE alert_reviews ("
+                        "alert_id TEXT PRIMARY KEY, status TEXT NOT NULL "
+                        "CHECK(status IN ('new','reviewed','expected')), "
+                        "note TEXT NOT NULL, updated_at TEXT NOT NULL)",
+                        "PRAGMA user_version=1",
+                    ):
+                        self._db.execute(statement)
+                self._db.execute(
+                    "DELETE FROM alert_reviews WHERE alert_id NOT IN (SELECT alert_id FROM alerts)"
                 )
         except BaseException:
             # The caller never receives this instance if initialization fails.
@@ -122,13 +167,43 @@ class EventStore:
                 "ORDER BY timestamp DESC, alert_id DESC LIMIT -1 OFFSET ?)",
                 (self.max_alerts,),
             )
+            self._db.execute(
+                "DELETE FROM alert_reviews WHERE alert_id NOT IN (SELECT alert_id FROM alerts)"
+            )
+
+    def set_review(self, alert_id: str, status: str, note: str) -> dict | None:
+        """Record a human disposition for this alert only, without changing evidence."""
+        _validate_review(status, note)
+        with self._lock, self._db:
+            if not self._db.execute(
+                "SELECT 1 FROM alerts WHERE alert_id=?", (alert_id,)
+            ).fetchone():
+                return None
+            updated_at = format_timestamp(_now())
+            self._db.execute(
+                "INSERT INTO alert_reviews(alert_id,status,note,updated_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(alert_id) DO UPDATE SET "
+                "status=excluded.status,note=excluded.note,updated_at=excluded.updated_at",
+                (alert_id, status, note, updated_at),
+            )
+            return {"status": status, "note": note, "updated_at": updated_at}
 
     def evidence(self, alert_id: str) -> dict | None:
         with self._lock:
             row = self._db.execute(
-                "SELECT payload,evidence FROM alerts WHERE alert_id=?", (alert_id,)
+                "SELECT a.payload,a.evidence,r.status,r.note,r.updated_at FROM alerts a "
+                "LEFT JOIN alert_reviews r ON r.alert_id=a.alert_id WHERE a.alert_id=?",
+                (alert_id,),
             ).fetchone()
-            return {"alert": json.loads(row[0]), "events": json.loads(row[1])} if row else None
+            if row is None:
+                return None
+            alert = json.loads(row[0])
+            return {
+                "alert": alert,
+                "events": json.loads(row[1]),
+                "explanation": explanation_for(alert["rule_id"]),
+                "review": _review_object(row[2:]),
+            }
 
     def snapshot(self, limit: int = 100) -> dict:
         cutoff = format_timestamp(_now() - timedelta(hours=24))
@@ -149,6 +224,14 @@ class EventStore:
                         f"SELECT payload FROM {table} ORDER BY timestamp DESC LIMIT ?", (limit,)
                     )
                 ]
+            reviews = {
+                row[0]: _review_object(row[1:])
+                for row in self._db.execute(
+                    "SELECT alert_id,status,note,updated_at FROM alert_reviews"
+                )
+            }
+            for alert in data["alerts"]:
+                alert["review"] = reviews.get(alert["alert_id"], _review_object(None))
             history = [
                 {"hour": row[0] + ":00:00Z", "count": row[1]}
                 for row in self._db.execute(
@@ -405,7 +488,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._allowed():
             return
-        if urlsplit(self.path).path != "/api/scan":
+        path = urlsplit(self.path).path
+        review_match = re.fullmatch(r"/api/alerts/([a-f0-9]{64})/review", path)
+        if path != "/api/scan" and review_match is None:
             self._json_reply(404, {"error": "not_found"})
             return
         token = self.headers.get("X-Sentinel-Token", "")
@@ -416,11 +501,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = -1
-        if not 0 <= length <= 1024 or self.headers.get("Transfer-Encoding"):
+        body_limit = 8192 if review_match else 1024
+        if not 0 <= length <= body_limit or self.headers.get("Transfer-Encoding"):
             self._json_reply(400, {"error": "invalid_body"})
             return
-        if length:
-            self.rfile.read(length)
+        body = self.rfile.read(length) if length else b""
+        if review_match:
+            try:
+                payload = json.loads(body.decode("utf-8"), object_pairs_hook=_unique_json_object)
+                if type(payload) is not dict or set(payload) != {"status", "note"}:
+                    raise ValidationError("Review requires exactly status and note")
+                result = self.server.monitor.store.set_review(
+                    review_match[1], payload["status"], payload["note"]
+                )
+            except (UnicodeDecodeError, ValueError, RecursionError):
+                self._json_reply(400, {"error": "invalid_review"})
+                return
+            self._json_reply(
+                200 if result else 404, {"review": result} if result else {"error": "not_found"}
+            )
+            return
         started = self.server.monitor.request_scan()
         self._json_reply(202, {"status": "started" if started else "busy"})
 

@@ -123,7 +123,7 @@
 
           <section class="panel alert-panel" aria-labelledby="alerts-title">
             <div class="panel-heading">
-              <div class="panel-title"><h2 id="alerts-title">Alarmlar</h2><span class="count-badge" id="alert-count">0</span></div>
+              <div class="panel-title"><h2 id="alerts-title" tabindex="-1">Alarmlar</h2><span class="count-badge" id="alert-count">0</span></div>
               <label class="sr-only" for="severity-filter">Alarm önem düzeyi</label>
               <select id="severity-filter">
                 <option value="">Tüm önem düzeyleri</option>
@@ -148,8 +148,8 @@
       <footer class="footer"><p><span class="privacy-dot" aria-hidden="true"></span>Veriler bu bilgisayarda kalır.</p><p>Sauron Sentinel <span id="app-version"></span><span class="footer-divider">/</span>Donanım bağlantıları henüz etkin değil</p></footer>
     </div>
 
-    <dialog id="evidence-dialog" aria-labelledby="evidence-title">
-      <div class="evidence-header"><div><p class="eyebrow">ALARM İNCELEMESİ</p><h2 id="evidence-title">Alarmın dayandığı kayıtlar</h2></div><button class="icon-button" id="close-evidence" type="button" aria-label="Alarm incelemesini kapat">×</button></div>
+    <dialog id="evidence-dialog" aria-labelledby="evidence-title" aria-describedby="evidence-intro">
+      <div class="evidence-header"><div><p class="eyebrow">ALARM İNCELEMESİ</p><h2 id="evidence-title" tabindex="-1">Alarmı anla ve değerlendir</h2><p class="evidence-intro" id="evidence-intro">Açıklamayı ve kayıtları incele, ardından bu alarma ait değerlendirmeyi kaydet.</p></div><button class="icon-button" id="close-evidence" type="button" aria-label="Alarm incelemesini kapat">×</button></div>
       <div class="evidence-body" id="evidence-body"><p>Kanıtlar yükleniyor…</p></div>
     </dialog>
     <noscript><p class="noscript-message">Güvenlik panelini görüntülemek için tarayıcıda JavaScript etkin olmalı.</p></noscript>
