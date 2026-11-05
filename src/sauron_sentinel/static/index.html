@@ -21,7 +21,7 @@
         </a>
         <div class="topbar-right">
           <span class="local-label"><span class="lock-icon" aria-hidden="true"></span>Yerel çalışma alanı</span>
-          <span class="connection-badge pending" id="connection-status" role="status">Bağlanıyor</span>
+          <span class="connection-badge pending" id="connection-status" role="status">Panele bağlanıyor</span>
         </div>
       </header>
 
@@ -44,6 +44,21 @@
 
         <div class="notice notice-error" id="error-notice" role="alert" hidden></div>
         <div class="notice notice-info" id="scan-notice" role="status" hidden></div>
+
+        <section class="health-overview" aria-labelledby="health-title">
+          <div class="health-heading">
+            <div><p class="eyebrow">İZLEME DURUMU</p><h2 id="health-title">İlk kontrol bekleniyor</h2></div>
+            <span class="health-badge starting" id="health-badge">Başlıyor</span>
+          </div>
+          <p class="health-summary" id="health-summary" role="status">Windows günlüklerinin okunabilirliği kontrol edilecek. Panel bağlantısı, günlüklerin okunabildiği anlamına gelmez.</p>
+          <p class="health-next" id="health-next">İlk kontrol tamamlandığında kaynakların durumunu burada görebilirsin.</p>
+          <details class="first-use-help">
+            <summary>Bu uygulamayla neyi takip edebilirim?</summary>
+            <p>Windows'un kaydettiği seçili hizmet kurulumlarını, oturum açma ve hesap değişikliklerini, Defender bildirimlerini ve bazı sistem olaylarını bir arada görürsün. Kurala uyan olaylar inceleyebilmen için alarm oluşturur.</p>
+            <p>Yalnızca erişilebilen günlüklerdeki seçili kayıtlar okunur. Boş sonuç, ilgili Windows denetimlerinin açık olduğunu veya bilgisayarın güvende olduğunu kanıtlamaz. Kayıt sınırları ve kesintiler eksiklere yol açabilir.</p>
+            <p>Pencere açıkken izleme sürer; kapatınca durur. RF Canvas, CSI Radar ve LabMate donanım bağlantıları henüz uygulanmadı.</p>
+          </details>
+        </section>
 
         <section class="metrics" aria-label="Olay ve alarm özeti">
           <article class="metric-card">
@@ -70,13 +85,14 @@
 
         <section class="sources-section" aria-labelledby="sources-title">
           <div class="section-heading">
-            <div><h2 id="sources-title">Kaynak bağlantıları</h2><p>Bu bilgisayardaki Windows olay günlükleri</p></div>
+            <div><h2 id="sources-title">Windows kaynakları</h2><p>Son tamamlanan kontrolün sonuçları · panel bağlantısından bağımsız</p></div>
             <span class="monitor-status" id="monitor-status">İzleyici kontrol ediliyor</span>
           </div>
           <div class="source-grid" id="source-list">
             <div class="source-placeholder">Kaynak durumları bekleniyor…</div>
           </div>
-          <p class="permission-note" id="permission-note" hidden>Security günlüğü için yönetici erişimi gerekebilir. Diğer erişilebilir günlükler izlenmeye devam eder.</p>
+          <p class="permission-note" id="permission-note" hidden>Security günlüğünün okuma izni alınamadı. Windows Olay Görüntüleyicisi’nde erişimi kontrol edebilir veya yetkili kullanıcıdan destek alabilirsin. Uygulama izinleri değiştirmez.</p>
+          <p class="source-session-note">Son başarılı okuma saatleri yalnızca bu açılış boyunca tutulur; uygulama yeniden açıldığında sıfırlanır.</p>
           <p class="permission-note" id="coverage-note" hidden></p>
         </section>
 
@@ -86,7 +102,7 @@
             <input id="search-input" type="search" placeholder="Cihaz, kullanıcı, olay veya kural ara…" autocomplete="off">
             <span class="search-hint">Bu görünümde ara</span>
           </label>
-          <p class="last-update">Son tarama <time id="last-scan">henüz yapılmadı</time></p>
+          <p class="last-update">Son tamamlanan kontrol <time id="last-scan">henüz yapılmadı</time></p>
         </div>
 
         <div class="workspace-grid">

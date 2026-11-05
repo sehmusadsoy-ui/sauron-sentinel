@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import errno
 import importlib
 import json
 import os
 import platform
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -25,6 +27,7 @@ from urllib.request import urlopen
 
 from . import __version__
 from .live import DashboardServer, EventStore, LiveMonitor
+from .models import ValidationError
 from .rules import load_rules
 from .windows import CHANNELS, CollectionBatch
 
@@ -116,6 +119,7 @@ class DesktopRuntime:
         self._http_thread: threading.Thread | None = None
         self._close_lock = threading.Lock()
         self._closed = False
+        self.startup_stage = "components"
 
     def start(self) -> str:
         if self._closed:
@@ -123,10 +127,16 @@ class DesktopRuntime:
         if self.server is not None:
             return self.server.url
         try:
+            self.startup_stage = "data_directory"
             self.lock.acquire()
+            self.startup_stage = "database"
             self.store = EventStore(self.data_dir)
+            self.startup_stage = "configuration"
+            load_rules()
+            self.startup_stage = "monitor"
             options = {} if self.collector is None else {"collector": self.collector}
             self.monitor = LiveMonitor(self.store, **options)
+            self.startup_stage = "server"
             self.server = DashboardServer(self.monitor, port=0)
             self._http_thread = threading.Thread(
                 target=lambda: self.server.serve_forever(poll_interval=0.1),
@@ -135,6 +145,7 @@ class DesktopRuntime:
             )
             self._http_thread.start()
             self.monitor.start()
+            self.startup_stage = "window"
             return self.server.url
         except BaseException:
             self.close()
@@ -172,10 +183,8 @@ class DesktopRuntime:
 
 def _show_message(message: str, *, error: bool = True) -> None:
     """Show concise Turkish errors for a windowed executable without raw logs."""
-    if platform.system() == "Windows" and (getattr(sys, "frozen", False) or sys.stderr is None):
+    if platform.system() == "Windows" and getattr(sys, "frozen", False):
         try:
-            import ctypes
-
             ctypes.windll.user32.MessageBoxW(
                 None, message, "Sauron Sentinel", 0x10 if error else 0x40
             )
@@ -184,6 +193,130 @@ def _show_message(message: str, *, error: bool = True) -> None:
             pass
     if sys.stderr is not None:
         print(f"Sauron Sentinel: {message}", file=sys.stderr)
+
+
+_STARTUP_MESSAGES = {
+    "components": (
+        "Masaüstü bileşenleri yüklenemedi. Windows uygulama paketini eksiksiz "
+        "çıkarıp yeniden deneyin. Sorun sürerse paketi yeniden indirin."
+    ),
+    "component_file": (
+        "Uygulamanın ihtiyaç duyduğu bir dosya bulunamadı. Windows uygulama "
+        "paketini eksiksiz çıkarıp yeniden deneyin."
+    ),
+    "data_unavailable": (
+        "Veri klasörüne veya kayıt dosyasına erişilemiyor. Bu Windows hesabının "
+        "klasöre yazma izni olduğunu ve diskin erişilebilir olduğunu kontrol edin."
+    ),
+    "data_corrupt": (
+        "Kayıt dosyası bozuk veya beklenen biçimde değil. Dosyayı silmeyin; "
+        "yedeğini alıp destek isteyin."
+    ),
+    "data_busy": (
+        "Kayıt dosyası şu anda başka bir işlem tarafından kullanılıyor. "
+        "Dosyayı kullanan diğer uygulamayı kapatıp yeniden deneyin."
+    ),
+    "disk_full": "Yerel kayıt için yeterli disk alanı yok. Diskte yer açıp yeniden deneyin.",
+    "database": (
+        "Yerel kayıtlar açılamadı. Mevcut kayıt dosyasını silmeyin; "
+        "yedeğini alıp yerel açılış hata kaydıyla destek isteyin."
+    ),
+    "configuration": (
+        "Uygulamanın kural ayarları okunamadı veya geçersiz. Windows uygulama "
+        "paketini eksiksiz çıkarıp yeniden deneyin."
+    ),
+    "webview2_missing": (
+        "Microsoft'un denetimi kullanılabilir bir WebView2 bulamadı. "
+        "Microsoft Edge WebView2 Runtime'ı Microsoft'un resmî sitesinden "
+        "kurup uygulamayı yeniden açın."
+    ),
+    "window_unverified": (
+        "Uygulama penceresi açılamadı. WebView2 durumu doğrulanamadı. "
+        "Uygulama paketini eksiksiz çıkarıp yeniden deneyin; sorun sürerse "
+        "yerel açılış hata kaydıyla destek isteyin."
+    ),
+    "startup": (
+        "Uygulama başlatılamadı; neden doğrulanamadı. Yeniden açmayı deneyin; "
+        "sorun sürerse yerel açılış hata kaydıyla destek isteyin."
+    ),
+}
+
+
+def _classify_startup_error(
+    error: BaseException, *, stage: str, webview2_status: str = "unknown"
+) -> str:
+    """Classify evidence only; never read files or expose exception text/paths."""
+    if isinstance(error, sqlite3.Error):
+        # Extended SQLite result codes retain the primary code in the low byte.
+        code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+        if code in (sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB):
+            return "data_corrupt"
+        if code in (sqlite3.SQLITE_PERM, sqlite3.SQLITE_READONLY, sqlite3.SQLITE_CANTOPEN):
+            return "data_unavailable"
+        if code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            return "data_busy"
+        if code == sqlite3.SQLITE_FULL:
+            return "disk_full"
+        return "database"
+    if stage in ("data_directory", "database") and isinstance(error, OSError):
+        return "disk_full" if error.errno == errno.ENOSPC else "data_unavailable"
+    if stage == "configuration" and isinstance(error, (ValidationError, OSError)):
+        return "configuration"
+    if stage in ("components", "window") and isinstance(error, FileNotFoundError):
+        return "component_file"
+    if isinstance(error, ImportError):
+        return "components"
+    if stage == "window" and webview2_status == "missing":
+        return "webview2_missing"
+    if stage == "window" and webview2_status == "unknown":
+        return "window_unverified"
+    return "startup"
+
+
+def _probe_webview2_loader(loader, free_memory) -> str:
+    """Use Microsoft's read-only version query; unknown HRESULTs prove no absence.
+
+    API contract and memory ownership:
+    https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/win32/webview2-idl#getavailablecorewebview2browserversionstring
+    """
+    query = loader.GetAvailableCoreWebView2BrowserVersionString
+    query.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
+    query.restype = ctypes.c_int32
+    free_memory.argtypes = [ctypes.c_void_p]
+    free_memory.restype = None
+    version = ctypes.c_void_p()
+    try:
+        result = query(None, ctypes.byref(version)) & 0xFFFFFFFF
+        # HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) is documented for no usable
+        # runtime/preview Edge installation, including configured overrides.
+        if result == 0x80070002:
+            return "missing"
+        return "available" if result == 0 and version.value else "unknown"
+    finally:
+        if version.value:
+            free_memory(version)
+
+
+def _webview2_runtime_status() -> str:
+    """Inspect the installed runtime without starting a browser or changing it."""
+    if platform.system() != "Windows":
+        return "unknown"
+    try:
+        util = importlib.import_module("webview.util")
+        machine = platform.machine().lower()
+        if ctypes.sizeof(ctypes.c_void_p) == 4:
+            architecture = "win-x86"
+        elif machine in ("arm64", "aarch64"):
+            architecture = "win-arm64"
+        else:
+            architecture = "win-x64"
+        native_dir = Path(util.interop_dll_path(architecture))
+        loader = ctypes.WinDLL(str(native_dir / "WebView2Loader.dll"))
+        return _probe_webview2_loader(loader, ctypes.windll.ole32.CoTaskMemFree)
+    except Exception:
+        # Missing bundled DLLs, .NET issues, policy failures and other errors
+        # must never become a claim that the installed runtime is missing.
+        return "unknown"
 
 
 def _same_origin(url: str, origin: str) -> bool:
@@ -406,24 +539,22 @@ def main(argv: list[str] | None = None) -> int:
         _show_message("Masaüstü uygulaması Windows 10 veya 11 gerektirir.")
         return 1
     runtime = DesktopRuntime(args.data_dir if args.data_dir is not None else default_data_dir())
+    stage = "components"
     try:
         webview = importlib.import_module("webview")
+        stage = "window"
         _run_window(runtime, webview)
         return 0
     except AlreadyRunning:
         runtime.close()
         _show_message("Sauron Sentinel bu veri klasörü için zaten açık.", error=False)
         return 0
-    except ImportError:
+    except (Exception, KeyboardInterrupt, SystemExit) as exc:
         _record_startup_error(runtime)
-        _show_message("Masaüstü bileşenleri bulunamadı. Windows uygulama paketini yeniden kurun.")
-        return 1
-    except (Exception, KeyboardInterrupt, SystemExit):
-        _record_startup_error(runtime)
-        _show_message(
-            "Uygulama başlatılamadı. Veri klasörünün erişilebilir olduğunu ve "
-            "Microsoft Edge WebView2 Runtime'ın kurulu olduğunu kontrol edin."
-        )
+        stage = getattr(runtime, "startup_stage", stage)
+        runtime_status = _webview2_runtime_status() if stage == "window" else "unknown"
+        category = _classify_startup_error(exc, stage=stage, webview2_status=runtime_status)
+        _show_message(_STARTUP_MESSAGES[category])
         return 1
     finally:
         runtime.close()

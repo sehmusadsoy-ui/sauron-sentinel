@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .engine import Alert, RuleEngine
+from .health import build_health
 from .models import Event, ValidationError, format_timestamp, normalize
 from .rules import load_rules
 from .windows import collect_windows
@@ -45,16 +46,21 @@ class EventStore:
         self.max_events, self.max_alerts = max_events, max_alerts
         self._lock = threading.RLock()
         self._db = sqlite3.connect(directory / "sentinel.db", check_same_thread=False)
-        with self._db:
-            self._db.executescript(
-                "CREATE TABLE IF NOT EXISTS events ("
-                "event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL);"
-                "CREATE INDEX IF NOT EXISTS events_time ON events(timestamp);"
-                "CREATE TABLE IF NOT EXISTS alerts ("
-                "alert_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL,"
-                "evidence TEXT NOT NULL);"
-                "CREATE INDEX IF NOT EXISTS alerts_time ON alerts(timestamp);"
-            )
+        try:
+            with self._db:
+                self._db.executescript(
+                    "CREATE TABLE IF NOT EXISTS events ("
+                    "event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL);"
+                    "CREATE INDEX IF NOT EXISTS events_time ON events(timestamp);"
+                    "CREATE TABLE IF NOT EXISTS alerts ("
+                    "alert_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL,"
+                    "evidence TEXT NOT NULL);"
+                    "CREATE INDEX IF NOT EXISTS alerts_time ON alerts(timestamp);"
+                )
+        except BaseException:
+            # The caller never receives this instance if initialization fails.
+            self._db.close()
+            raise
 
     def close(self) -> None:
         with self._lock:
@@ -180,13 +186,16 @@ class LiveMonitor:
         self._thread: threading.Thread | None = None
         self._status = {
             "running": False,
+            "stopped": False,
             "scanning": False,
             "interval_seconds": interval,
             "last_error": None,
             "late_events": 0,
+            "last_attempt_at": None,
         }
         self._last_scan_at: str | None = None
         self._sources: list[dict] = []
+        self._source_success: dict[str, str] = {}
 
     def _rebuild_engine(self) -> None:
         self._engine = RuleEngine(load_rules())
@@ -208,6 +217,7 @@ class LiveMonitor:
         scan_start = _now()
         with self._status_lock:
             self._status["scanning"] = True
+            self._status["last_attempt_at"] = format_timestamp(scan_start)
         try:
             if self._needs_rebuild:
                 self._rebuild_engine()
@@ -224,7 +234,14 @@ class LiveMonitor:
                 self._watermark = event.timestamp
             self.store.prune_events()
             with self._status_lock:
-                self._sources = batch.sources
+                completed_at = format_timestamp(_now())
+                sources = []
+                for source in batch.sources:
+                    channel = source["channel"]
+                    if source["status"] == "ok":
+                        self._source_success[channel] = completed_at
+                    sources.append({**source, "last_success_at": self._source_success.get(channel)})
+                self._sources = sources
                 self._last_scan_at = format_timestamp(scan_start)
                 self._status["last_error"] = None
                 self._status["late_events"] += late
@@ -276,6 +293,7 @@ class LiveMonitor:
         # Also wait for a user-requested scan before its database is closed.
         with self._scan_lock, self._status_lock:
             self._status["running"] = False
+            self._status["stopped"] = True
 
     def state(self, limit: int = 100) -> dict:
         with self._status_lock:
@@ -288,6 +306,7 @@ class LiveMonitor:
             "last_scan_at": last_scan,
             "monitor": status,
             "sources": sources,
+            "health": build_health(sources, status, last_scan),
             **self.store.snapshot(limit),
         }
 

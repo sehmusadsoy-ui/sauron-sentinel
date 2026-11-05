@@ -60,6 +60,22 @@ h1 { font-size: clamp(25px, 2.2vw, 34px); letter-spacing: -.04em; font-weight: 6
 .button-secondary:hover { background: #1a293b; border-color: #4b5d73; }
 .scan-icon { font-size: 20px; line-height: 16px; display: inline-block; }
 .scanning .scan-icon { animation: spin 1s linear infinite; }
+.health-overview { padding: 20px 22px; margin-bottom: 20px; border: 1px solid #30475b; border-radius: 10px; background: #101e2c; }
+.health-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
+.health-heading .eyebrow { margin-bottom: 6px; }
+.health-heading h2 { font-size: 17px; font-weight: 600; }
+.health-badge { display: inline-block; flex-shrink: 0; border: 1px solid #385064; border-radius: 5px; padding: 5px 8px; color: #b7c7d8; font-size: 10px; }
+.health-badge.ready { border-color: #35665b; color: #a0decd; }
+.health-badge.partial, .health-badge.unavailable { border-color: #68563b; color: #e5c48e; }
+.health-badge.error { border-color: #754651; color: #f0acb7; }
+.health-summary { color: #b5c6d9; font-size: 12px; margin-top: 12px; max-width: 950px; }
+.health-next { color: #92b5c1; font-size: 11px; margin-top: 7px; }
+.first-use-help { margin-top: 15px; padding-top: 12px; border-top: 1px solid #293e52; font-size: 11px; color: #9db0c5; }
+.first-use-help summary { cursor: pointer; color: #c3d4e6; }
+.first-use-help p { margin-top: 9px; max-width: 970px; }
+.source-purpose, .source-success, .source-note { font-size: 10px; color: #9aadc3; margin-top: 7px; }
+.source-success { color: #adbed0; }
+.source-session-note { color: #8c9fb7; font-size: 10px; margin-top: 10px; }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .metric-card { background: linear-gradient(120deg, #142030, #101a28); border: 1px solid var(--border); border-radius: 10px; padding: 19px 21px 18px; }
 .metric-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -189,6 +205,9 @@ dialog::backdrop { background: #050b14cb; backdrop-filter: blur(5px); }
   .search-hint { display: none; }
 }
 @media (max-width: 760px) {
+  .health-overview { padding: 16px; }
+  .health-heading { flex-direction: column; gap: 10px; }
+  .health-heading h2 { font-size: 16px; }
   .app-shell { padding: 0 18px; }
   .topbar { min-height: 73px; }
   .brand { gap: 9px; }

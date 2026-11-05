@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import json
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -441,3 +443,261 @@ def test_startup_error_stops_monitor_before_showing_dialog(tmp_path, monkeypatch
     monkeypatch.setattr(desktop, "_show_message", show)
     assert desktop.main(["--data-dir", str(tmp_path)]) == 1
     assert "private failure" in (tmp_path / "startup-error.log").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("error", "stage", "runtime_status", "expected"),
+    [
+        (ModuleNotFoundError("private module"), "components", "unknown", "components"),
+        (ModuleNotFoundError("private module"), "window", "missing", "components"),
+        (FileNotFoundError("C:/private/win-arm64"), "window", "missing", "component_file"),
+        (PermissionError("C:/private/data"), "data_directory", "missing", "data_unavailable"),
+        (OSError(errno.ENOSPC, "private volume"), "database", "unknown", "disk_full"),
+        (desktop.ValidationError("private setting"), "configuration", "missing", "configuration"),
+        (RuntimeError("private renderer"), "window", "missing", "webview2_missing"),
+        (RuntimeError("private renderer"), "window", "unknown", "window_unverified"),
+        (RuntimeError("private renderer"), "window", "available", "startup"),
+        (PermissionError("private library"), "window", "available", "startup"),
+        (RuntimeError("private server"), "server", "missing", "startup"),
+        (KeyboardInterrupt("private interrupt"), "window", "unknown", "window_unverified"),
+    ],
+)
+def test_startup_classification_uses_evidence_without_private_details(
+    error, stage, runtime_status, expected
+):
+    category = desktop._classify_startup_error(error, stage=stage, webview2_status=runtime_status)
+    assert category == expected
+    message = desktop._STARTUP_MESSAGES[category]
+    assert "private" not in message and "C:/" not in message
+    assert str(error) not in message
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (sqlite3.SQLITE_CORRUPT, "data_corrupt"),
+        (sqlite3.SQLITE_NOTADB, "data_corrupt"),
+        (sqlite3.SQLITE_READONLY | (1 << 8), "data_unavailable"),
+        (sqlite3.SQLITE_CANTOPEN, "data_unavailable"),
+        (sqlite3.SQLITE_BUSY, "data_busy"),
+        (sqlite3.SQLITE_LOCKED, "data_busy"),
+        (sqlite3.SQLITE_FULL, "disk_full"),
+        (sqlite3.SQLITE_ERROR, "database"),
+    ],
+)
+def test_startup_sqlite_classification_uses_result_codes_not_error_text(code, expected):
+    error = sqlite3.DatabaseError("private path and arbitrary text")
+    error.sqlite_errorcode = code
+    assert desktop._classify_startup_error(error, stage="database") == expected
+
+
+@pytest.mark.parametrize(
+    ("result", "has_version", "expected"),
+    [
+        (0, True, "available"),
+        (0, False, "unknown"),
+        (0x80070002, False, "missing"),
+        (-2147024894, False, "missing"),
+        (0x80070005, False, "unknown"),
+        (0x80004005, True, "unknown"),
+    ],
+)
+def test_webview2_native_query_only_treats_documented_hresult_as_missing(
+    result, has_version, expected
+):
+    calls, released = [], []
+
+    def query(folder, pointer):
+        calls.append(folder)
+        if has_version:
+            pointer._obj.value = 1234
+        return result
+
+    def free_memory(pointer):
+        released.append(pointer.value)
+
+    loader = SimpleNamespace(GetAvailableCoreWebView2BrowserVersionString=query)
+    assert desktop._probe_webview2_loader(loader, free_memory) == expected
+    assert calls == [None]
+    assert released == ([1234] if has_version else [])
+    assert query.restype == desktop.ctypes.c_int32
+
+
+def test_webview2_detection_uses_packaged_loader_without_changing_environment(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(desktop.platform, "machine", lambda: "AMD64")
+    monkeypatch.setattr(desktop.ctypes, "sizeof", lambda value: 8)
+    imported, resolved, loaded = [], [], []
+
+    def dll_path(architecture):
+        resolved.append(architecture)
+        return str(tmp_path / architecture)
+
+    def load_module(name):
+        imported.append(name)
+        return SimpleNamespace(interop_dll_path=dll_path)
+
+    loader = object()
+
+    def load_native(path):
+        loaded.append(path)
+        return loader
+
+    free = object()
+    monkeypatch.setattr(desktop.importlib, "import_module", load_module)
+    monkeypatch.setattr(desktop.ctypes, "WinDLL", load_native, raising=False)
+    monkeypatch.setattr(
+        desktop.ctypes,
+        "windll",
+        SimpleNamespace(ole32=SimpleNamespace(CoTaskMemFree=free)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        desktop,
+        "_probe_webview2_loader",
+        lambda native, release: "available" if native is loader and release is free else "unknown",
+    )
+    assert desktop._webview2_runtime_status() == "available"
+    assert imported == ["webview.util"]
+    assert resolved == ["win-x64"]
+    assert loaded == [str(tmp_path / "win-x64" / "WebView2Loader.dll")]
+
+
+def test_missing_packaged_loader_does_not_mean_installed_webview2_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+
+    monkeypatch.setattr(
+        desktop.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(interop_dll_path=lambda architecture: str(tmp_path)),
+    )
+
+    def missing(_path):
+        raise FileNotFoundError("private bundled DLL path")
+
+    monkeypatch.setattr(desktop.ctypes, "WinDLL", missing, raising=False)
+    assert desktop._webview2_runtime_status() == "unknown"
+
+
+def test_corrupt_database_failure_preserves_bytes_and_releases_lock(tmp_path, monkeypatch):
+    database = tmp_path / "sentinel.db"
+    original = b"private invalid SQLite file that must not be replaced"
+    database.write_bytes(original)
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(desktop.importlib, "import_module", lambda name: FakeWebview())
+
+    def show(message, **kwargs):
+        assert message == desktop._STARTUP_MESSAGES["data_corrupt"]
+        assert "private" not in message and str(tmp_path) not in message
+        probe = desktop.InstanceLock(tmp_path)
+        probe.acquire()
+        probe.release()
+
+    monkeypatch.setattr(desktop, "_show_message", show)
+    assert desktop.main(["--data-dir", str(tmp_path)]) == 1
+    assert database.read_bytes() == original
+    assert "DatabaseError" in (tmp_path / "startup-error.log").read_text(encoding="utf-8")
+
+
+def test_unusable_data_directory_does_not_probe_webview_or_replace_existing_file(
+    tmp_path, monkeypatch
+):
+    directory = tmp_path / "private-data"
+    original = b"private existing file"
+    directory.write_bytes(original)
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(desktop.importlib, "import_module", lambda name: FakeWebview())
+
+    def no_probe():
+        raise AssertionError("A data directory failure is not evidence about WebView2")
+
+    messages = []
+    monkeypatch.setattr(desktop, "_webview2_runtime_status", no_probe)
+    monkeypatch.setattr(desktop, "_show_message", lambda message: messages.append(message))
+    assert desktop.main(["--data-dir", str(directory)]) == 1
+    assert messages == [desktop._STARTUP_MESSAGES["data_unavailable"]]
+    assert directory.read_bytes() == original
+
+
+def test_invalid_rules_fail_before_monitor_start_and_keep_database(tmp_path, monkeypatch):
+    store = desktop.EventStore(tmp_path)
+    store.close()
+    database = tmp_path / "sentinel.db"
+    original = database.read_bytes()
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(desktop.importlib, "import_module", lambda name: FakeWebview())
+
+    def invalid_rules():
+        raise desktop.ValidationError("private rule configuration")
+
+    def no_monitor(*args, **kwargs):
+        raise AssertionError("Invalid rules must fail before a monitor is constructed")
+
+    messages = []
+    monkeypatch.setattr(desktop, "load_rules", invalid_rules)
+    monkeypatch.setattr(desktop, "LiveMonitor", no_monitor)
+    monkeypatch.setattr(desktop, "_show_message", lambda message: messages.append(message))
+    assert desktop.main(["--data-dir", str(tmp_path)]) == 1
+    assert messages == [desktop._STARTUP_MESSAGES["configuration"]]
+    assert database.read_bytes() == original
+    lock = desktop.InstanceLock(tmp_path)
+    lock.acquire()
+    lock.release()
+
+
+@pytest.mark.parametrize("stage", ["data_directory", "configuration", "window"])
+def test_main_failure_cleans_up_before_probe_and_message(tmp_path, monkeypatch, stage):
+    runtime = FakeRuntime(tmp_path)
+    runtime.startup_stage = stage
+    error = (
+        PermissionError("private directory")
+        if stage == "data_directory"
+        else desktop.ValidationError("private rules")
+        if stage == "configuration"
+        else RuntimeError("private window")
+    )
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(desktop, "DesktopRuntime", lambda path: runtime)
+    monkeypatch.setattr(desktop.importlib, "import_module", lambda name: FakeWebview())
+
+    def fail(*args):
+        raise error
+
+    def probe():
+        assert runtime.closed
+        return "missing"
+
+    messages = []
+
+    def show(message, **kwargs):
+        assert runtime.closed
+        assert "private" not in message
+        messages.append(message)
+
+    monkeypatch.setattr(desktop, "_run_window", fail)
+    monkeypatch.setattr(desktop, "_webview2_runtime_status", probe)
+    monkeypatch.setattr(desktop, "_show_message", show)
+    assert desktop.main(["--data-dir", str(tmp_path)]) == 1
+    expected = {
+        "data_directory": "data_unavailable",
+        "configuration": "configuration",
+        "window": "webview2_missing",
+    }[stage]
+    assert messages == [desktop._STARTUP_MESSAGES[expected]]
+
+
+def test_source_run_without_stderr_never_opens_native_dialog(monkeypatch):
+    called = []
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(desktop.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(desktop.sys, "stderr", None)
+    monkeypatch.setattr(
+        desktop.ctypes,
+        "windll",
+        SimpleNamespace(user32=SimpleNamespace(MessageBoxW=lambda *args: called.append(args))),
+        raising=False,
+    )
+    desktop._show_message("Kısa hata")
+    assert called == []

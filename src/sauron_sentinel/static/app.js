@@ -22,6 +22,21 @@
     invalid_event: "Bir kayıt beklenen biçimde okunamadı.",
     timeout: "Windows günlüğü beklenen sürede yanıt vermedi.",
     invalid_response: "Windows günlüklerinin yanıtı okunamadı.",
+    not_windows: "Windows olay günlükleri yalnızca Windows üzerinde okunabilir.",
+    powershell_unavailable: "Windows günlüklerini okumak için gereken PowerShell bulunamadı.",
+  };
+  const sourcePurposes = {
+    System: "Hizmet kurulumu ve başlangıç değişiklikleri, açılış/kapanış ve günlük temizleme kayıtları.",
+    Security: "Oturum açma, yerel hesap/grup değişiklikleri ve günlük temizleme kayıtları.",
+    "Microsoft-Windows-Windows Defender/Operational": "Defender tehdit, işlem ve koruma ayarı kayıtları.",
+  };
+  const sourceNextSteps = {
+    permission_denied: "Bu günlüğün okuma izinlerini Olay Görüntüleyicisi’nde kontrol et veya yetkili kullanıcıdan destek al.",
+    channel_unavailable: "Bu kanalın bilgisayarındaki Windows sürümünde mevcut olup olmadığını Olay Görüntüleyicisi’nde kontrol et.",
+    channel_disabled: "Bu kanalın durumunu Olay Görüntüleyicisi’nde kontrol et. Uygulama Windows günlük ayarlarını değiştirmez.",
+    timeout: "Bir sonraki kontrolü bekle veya biraz sonra Şimdi tara düğmesini kullan.",
+    not_windows: "Canlı izleme için uygulamayı bir Windows bilgisayarda aç.",
+    powershell_unavailable: "Windows PowerShell’in kullanılabilirliğini kontrol et veya sistem yöneticisinden destek al.",
   };
   const kindNames = {
     "auth.failure": "Başarısız oturum açma",
@@ -120,7 +135,27 @@
     }
   }
 
-  function renderSources(sources, monitor) {
+  function renderHealth(health, monitor) {
+    const status = ["starting", "ready", "partial", "unavailable", "error", "stopped"].includes(health.status) ? health.status : "starting";
+    const labels = { starting: "Başlıyor", ready: "Kaynaklar okunabildi", partial: "Kısmi görünürlük", unavailable: "Kaynaklar okunamıyor", error: "Kontrol gerekli", stopped: "İzleme durdu" };
+    const available = `${count(health.sources_ok)} / ${count(health.sources_total)} kaynak`;
+    const messages = {
+      starting: ["İlk kontrol bekleniyor", "Windows günlükleri henüz kontrol edilmedi. Saklanan geçmiş kayıtlar, şu anda veri okunabildiğini göstermez.", "İlk kontrol tamamlanana kadar bekle."],
+      ready: ["Windows kaynaklarının son kontrolü tamamlandı", `${available} okunabildi. Bu durum günlük erişimini gösterir; tüm olayların kaydedildiğini veya bilgisayarın güvende olduğunu kanıtlamaz.`, "Olayları ve alarm ayrıntılarını aşağıdan inceleyebilirsin."],
+      partial: ["Windows olaylarının bir bölümü görülebiliyor", `${available} okunabildi. ${health.sources_limited > 0 ? `${count(health.sources_limited)} kaynakta kayıt sınırına ulaşıldı; bazı kayıtlar kapsam dışında kalmış olabilir.` : "Diğer kaynaklar okunamadı veya henüz sonuç vermedi."}`, "Kaynak kartlarındaki açıklamaları kontrol et; erişilebilen kaynakların kayıtları izlenmeye devam eder."],
+      unavailable: ["Windows günlükleri şu anda okunamıyor", "Son kontrolde hiçbir kaynağın okunabilirliği doğrulanamadı. Kayıt olmaması, olay yaşanmadığı anlamına gelmez.", "Aşağıdaki kaynak açıklamalarından eksik izin veya kapalı kanal durumunu kontrol et."],
+      error: ["Son kontrol tamamlanamadı", health.source_results_current ? "Son kontrolde kaynakların okunması sırasında sorun oluştu." : "Kaynak kartları varsa önceki sonuçları gösterir; güncel erişim durumu doğrulanamadı.", "Bir sonraki kontrolü bekle veya Şimdi tara düğmesiyle yeniden dene; sorun sürerse kaynak açıklamalarını kontrol et."],
+      stopped: ["İzleme durdu", "Saklanan olaylar ve son kaynak sonuçları gösteriliyor. Yeni Windows kayıtları şu anda kontrol edilmiyor.", "İzlemeyi sürdürmek için uygulamayı yeniden aç."],
+    };
+    const [title, summary, next] = messages[status];
+    node("health-title").textContent = title;
+    node("health-summary").textContent = summary;
+    node("health-next").textContent = monitor.scanning ? "Yeni kontrol sürüyor; kaynak kartları son tamamlanan kontrolü gösterir." : next;
+    node("health-badge").textContent = labels[status];
+    node("health-badge").className = `health-badge ${status}`;
+  }
+
+  function renderSources(sources, monitor, health) {
     const fragment = document.createDocumentFragment();
     let needsPermission = false;
     for (const source of sources) {
@@ -129,27 +164,32 @@
       const card = element("article", "source-card");
       const content = element("div", "source-content");
       const titleRow = element("div", "source-title-row");
-      const label = { ok: "Erişilebilir", unavailable: "Erişilemiyor", error: "Kontrol gerekli", pending: "Bekleniyor" }[status];
+      const stale = health.source_results_current === false;
+      const label = { ok: stale ? "Önceki kontrolde okundu" : "Okunabildi", unavailable: "Okunamadı", error: "Kontrol gerekli", pending: "Bekleniyor" }[status];
       titleRow.append(element("h3", "source-title", sourceName(channel)), element("span", `source-state ${status}`, label));
-      content.append(titleRow, element("p", "source-count", `${count(source.event_count)} kayıt`));
-      if (source.limit_reached) content.append(element("p", "source-warning", "Bu taramada kayıt sınırına ulaşıldı"));
+      content.append(titleRow, element("p", "source-purpose", sourcePurposes[channel] || "Seçili Windows olay kayıtları."));
+      content.append(element("p", "source-count", status === "ok" ? `${count(source.event_count)} seçili kayıt · son kontrol` : "Bu kontrolde okuma doğrulanamadı"));
+      content.append(element("p", "source-success", source.last_success_at ? `Son başarılı okuma: ${formatDate(source.last_success_at)}` : "Bu açılışta henüz başarılı okuma yok"));
+      if (status === "ok" && source.event_count === 0) content.append(element("p", "source-note", "Günlük okunabildi; sorgu aralığında seçili kayıt bulunmadı. Bu, ilgili Windows denetimlerinin açık olduğunu kanıtlamaz."));
+      if (source.limit_reached) content.append(element("p", "source-warning", "Kayıt sınırına ulaşıldı; sorgu aralığının tamamı kapsanmayabilir. İlgili günlüğü Olay Görüntüleyicisi’nde kontrol edebilirsin."));
       if (source.error) {
         const details = element("details", "source-error");
-        details.append(element("summary", "", "Erişim ayrıntısı"), element("p", "", sourceErrors[source.error] || "Bu kaynak şu anda okunamıyor. Uygulamayı açık tutup yeniden tara."));
+        content.append(element("p", "source-warning", sourceErrors[source.error] || "Bu kaynak şu anda okunamıyor."));
+        details.append(element("summary", "", "Ne yapabilirim?"), element("p", "", sourceNextSteps[source.error] || "Bir sonraki kontrolü bekle veya biraz sonra Şimdi tara düğmesiyle yeniden dene."));
         content.append(details);
       }
       card.append(element("span", "source-icon", channel.includes("Defender") ? "◇" : "▤"), content);
       fragment.append(card);
-      if (channel === "Security" && status !== "ok") needsPermission = true;
+      if (channel === "Security" && source.error === "permission_denied") needsPermission = true;
     }
     if (!sources.length) fragment.append(element("p", "source-placeholder", "Henüz bir Windows kaynağı raporlanmadı. İlk tarama sonrasında kaynak durumları burada görünür."));
-    const fingerprint = JSON.stringify(sources);
+    const fingerprint = JSON.stringify([sources, health.source_results_current]);
     if (state.renderedSources !== fingerprint) {
       node("source-list").replaceChildren(fragment);
       state.renderedSources = fingerprint;
     }
     node("permission-note").hidden = !needsPermission;
-    notice("coverage-note", monitor.late_events > 0 ? `${count(monitor.late_events)} gecikmeli kayıt saklandı; geçmiş zamana ait oldukları için alarm motoruna yeniden gönderilmedi.` : "");
+    notice("coverage-note", monitor.late_events > 0 ? `${count(monitor.late_events)} gecikmeli kayıt saklandı; bu kontrolde anlık alarm değerlendirmesine alınmadı. Yeniden açılışta veya kurtarma sırasında saklanan kayıtların yeniden değerlendirilmesi geçmiş zamana ait alarm oluşturabilir.` : "");
     const interval = typeof monitor.interval_seconds === "number" ? ` · ${count(monitor.interval_seconds)} sn aralıkla` : "";
     node("monitor-status").textContent = monitor.scanning ? "Windows günlükleri taranıyor…" : monitor.running ? `Otomatik izleme açık${interval}` : "Otomatik izleme duraklatıldı";
   }
@@ -303,16 +343,22 @@
       lastScan.textContent = data.last_scan_at ? formatDate(data.last_scan_at, timeFormat) : "henüz yapılmadı";
       lastScan.dateTime = data.last_scan_at || "";
       lastScan.title = data.last_scan_at ? formatDate(data.last_scan_at) : "";
-      renderSources(Array.isArray(data.sources) ? data.sources : [], data.monitor || {});
+      renderHealth(data.health || {}, data.monitor || {});
+      renderSources(Array.isArray(data.sources) ? data.sources : [], data.monitor || {}, data.health || {});
       syncKindOptions(Array.isArray(data.events) ? data.events : []);
       renderEvents();
       renderAlerts();
-      node("connection-status").textContent = "Bağlı";
+      node("connection-status").textContent = "Panel bağlı";
       node("connection-status").className = "connection-badge";
       notice("error-notice", data.monitor?.last_error ? "Windows günlükleri okunurken bir sorun oluştu. Kaynak durumlarını kontrol et; otomatik izleme yeniden deneyecek." : "");
     } catch {
-      node("connection-status").textContent = "Bağlantı kesildi";
+      node("connection-status").textContent = "Panel bağlantısı kesildi";
       node("connection-status").className = "connection-badge offline";
+      node("health-title").textContent = "Kaynak durumu güncellenemiyor";
+      node("health-summary").textContent = "Yerel izleyiciyle bağlantı kurulamadığı için kaynakların son durumunu doğrulayamıyoruz. Görünen kayıtlar önceki yüklemeden kalmış olabilir.";
+      node("health-next").textContent = "Uygulamanın açık olduğunu kontrol et. Bağlantı geldiğinde görünüm yenilenecek.";
+      node("health-badge").textContent = "Güncel değil";
+      node("health-badge").className = "health-badge error";
       notice("error-notice", "Yerel izleyiciye ulaşılamıyor. Uygulamanın açık olduğunu kontrol et. Bağlantı geldiğinde görünüm kendiliğinden yenilenecek.");
     } finally {
       state.fetching = false;
