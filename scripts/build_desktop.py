@@ -179,6 +179,7 @@ def _audit_archive_path(name: str, *, directory: bool = False) -> None:
 def _audit_frozen_entries(archive, private_strings: tuple[str, ...]) -> dict[str, int]:
     needles = _private_needles(private_strings)
     counts = {"frozen_entries": 0, "zip_members": 0}
+    base_library_scanned = False
 
     def inspect(payload: bytes | None) -> None:
         if payload and any(needle in payload.lower() for needle in needles):
@@ -201,10 +202,11 @@ def _audit_frozen_entries(archive, private_strings: tuple[str, ...]) -> dict[str
         payload = archive.extract(name)
         inspect(payload)
         counts["frozen_entries"] += 1
-        if kind == "Z" or (kind == "x" and name.lower().endswith(".zip")):
-            # One-file builds store base_library.zip as a data entry.
+        if kind == "Z" or (kind in {"b", "x"} and name.lower().endswith(".zip")):
+            # PyInstaller may store base_library.zip as a binary or data entry.
             with zipfile.ZipFile(io.BytesIO(payload)) as zipped:
-                for member in zipped.infolist():
+                members = zipped.infolist()
+                for member in members:
                     if stat.S_ISLNK(member.external_attr >> 16) or (
                         member.external_attr & stat.FILE_ATTRIBUTE_REPARSE_POINT
                     ):
@@ -213,6 +215,10 @@ def _audit_frozen_entries(archive, private_strings: tuple[str, ...]) -> dict[str
                     inspect(member.orig_filename.encode("utf-8"))
                     inspect(zipped.read(member))
                     counts["zip_members"] += 1
+                if name.lower() == "base_library.zip":
+                    base_library_scanned = any(not member.is_dir() for member in members)
+    if not base_library_scanned:
+        raise ValueError("Frozen archive is missing an audited base_library.zip")
     return counts
 
 

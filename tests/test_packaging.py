@@ -119,25 +119,34 @@ def test_archive_contains_only_the_named_portable_folder(builder, tmp_path):
         }
 
 
-def _archive_with_library_zip(member, payload):
+def _archive_with_library_zip(member, payload, *, kind="b"):
     zipped = io.BytesIO()
     with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_DEFLATED) as library:
         library.writestr(member, payload)
     entries = {"base_library.zip": zipped.getvalue()}
-    return SimpleNamespace(toc={"base_library.zip": ("x",)}, extract=entries.__getitem__)
+    return SimpleNamespace(toc={"base_library.zip": (kind,)}, extract=entries.__getitem__)
 
 
-def test_frozen_audit_checks_decompressed_library_zip(builder):
+@pytest.mark.parametrize("kind", ["b", "x", "Z"])
+def test_frozen_audit_checks_decompressed_library_zip(builder, kind):
     private = "C:/private-builder/profile"
-    clean = _archive_with_library_zip("encodings/__init__.pyc", b"bytecode")
+    clean = _archive_with_library_zip("encodings/__init__.pyc", b"bytecode", kind=kind)
     assert builder._audit_frozen_entries(clean, (private,)) == {
         "frozen_entries": 1,
         "zip_members": 1,
     }
-    embedded = _archive_with_library_zip("encodings/__init__.pyc", private.encode("utf-16-le"))
+    embedded = _archive_with_library_zip(
+        "encodings/__init__.pyc", private.encode("utf-16-le"), kind=kind
+    )
     assert private.encode("utf-16-le") not in embedded.extract("base_library.zip")
     with pytest.raises(ValueError, match="private builder"):
         builder._audit_frozen_entries(embedded, (private,))
+
+
+def test_frozen_audit_requires_scanned_base_library(builder):
+    unscanned = _archive_with_library_zip("encodings/__init__.pyc", b"bytecode", kind="s")
+    with pytest.raises(ValueError, match="missing an audited base_library.zip"):
+        builder._audit_frozen_entries(unscanned, ())
 
 
 @pytest.mark.parametrize(
