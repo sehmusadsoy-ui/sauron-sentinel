@@ -105,6 +105,22 @@ class FakeRuntime:
         self.notifier.close()
 
 
+@pytest.fixture
+def bundled_pythonnet(tmp_path, monkeypatch):
+    bundle = tmp_path / "private bundle"
+    dll = bundle / "pythonnet" / "runtime" / "Python.Runtime.dll"
+    dll.parent.mkdir(parents=True)
+    dll.touch()
+    monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(desktop.sys, "_MEIPASS", str(bundle), raising=False)
+    return dll
+
+
+def _pythonnet_loader_error(dll):
+    return RuntimeError(f"Failed to resolve Python.Runtime.Loader.Initialize from {dll}")
+
+
 def test_default_windows_data_is_per_user_not_source_checkout(tmp_path, monkeypatch):
     monkeypatch.setattr(desktop.platform, "system", lambda: "Windows")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
@@ -411,6 +427,27 @@ def test_diagnosis_failure_is_generic_report(tmp_path, monkeypatch):
     assert "private installation path" not in report_path.read_text(encoding="utf-8")
 
 
+def test_diagnosis_reports_bundled_pythonnet_download_block_without_paths(
+    bundled_pythonnet, tmp_path, monkeypatch
+):
+    Path(f"{bundled_pythonnet}:Zone.Identifier").write_bytes(
+        b"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/private-download\r\n"
+    )
+
+    def fail():
+        raise RuntimeError("private wrapper") from _pythonnet_loader_error(bundled_pythonnet)
+
+    monkeypatch.setattr(desktop, "_verify_desktop_libraries", fail)
+    report_path = tmp_path / "report.json"
+    assert desktop.main(["--diagnose", str(report_path)]) == 1
+    contents = report_path.read_text(encoding="utf-8")
+    report = json.loads(contents)
+    assert report["status"] == "failed"
+    assert report["error"] == "pythonnet_download_blocked"
+    assert report["checks"] == {"resources": True, "rules": True}
+    assert "private" not in contents
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -466,6 +503,72 @@ def test_startup_error_stops_monitor_before_showing_dialog(tmp_path, monkeypatch
     monkeypatch.setattr(desktop, "_show_message", show)
     assert desktop.main(["--data-dir", str(tmp_path)]) == 1
     assert "private failure" in (tmp_path / "startup-error.log").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("marked", [True, False])
+def test_startup_pythonnet_download_block_requires_marker(
+    bundled_pythonnet, tmp_path, monkeypatch, marked
+):
+    marker = Path(f"{bundled_pythonnet}:Zone.Identifier")
+    if marked:
+        marker.write_bytes(b"[ZoneTransfer]\r\nZoneId=3\r\n")
+    runtime = FakeRuntime(tmp_path)
+    messages, probes = [], []
+
+    def fail(*args):
+        try:
+            raise _pythonnet_loader_error(bundled_pythonnet)
+        except RuntimeError:
+            # pywebview's retry leaves an implicit exception context.
+            raise ImportError("private retry failure")  # noqa: B904
+
+    def probe():
+        probes.append(True)
+        return "unknown"
+
+    monkeypatch.setattr(desktop, "DesktopRuntime", lambda path: runtime)
+    monkeypatch.setattr(desktop.importlib, "import_module", lambda name: FakeWebview())
+    monkeypatch.setattr(desktop, "_run_window", fail)
+    monkeypatch.setattr(desktop, "_webview2_runtime_status", probe)
+    monkeypatch.setattr(desktop, "_show_message", messages.append)
+    assert desktop.main(["--data-dir", str(tmp_path)]) == 1
+    assert runtime.closed
+    expected = "pythonnet_download_blocked" if marked else "components"
+    assert messages == [desktop._STARTUP_MESSAGES[expected]]
+    assert "private" not in messages[0]
+    assert probes == ([] if marked else [True])
+    assert marker.exists() == marked
+    log = (tmp_path / "startup-error.log").read_text(encoding="utf-8")
+    assert str(bundled_pythonnet) in log and "private retry failure" in log
+
+
+@pytest.mark.parametrize(
+    ("marker", "expected"),
+    [
+        (b"[ZoneTransfer]\r\nZoneId=4\r\n", True),
+        (b"[ZoneTransfer]\r\nZoneId=2\r\n", False),
+        (b"[ZoneTransfer]\r\nZoneId=30\r\n", False),
+        (b"[OtherSection]\r\nZoneId=3\r\n", False),
+        (b"[ZoneTransfer]\r\nZoneId=3\r\nZoneId=2\r\n", False),
+        (b"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=" + b"x" * 4096, False),
+    ],
+)
+def test_bundled_pythonnet_download_block_requires_internet_or_restricted_zone(
+    bundled_pythonnet, marker, expected
+):
+    Path(f"{bundled_pythonnet}:Zone.Identifier").write_bytes(marker)
+    error = _pythonnet_loader_error(bundled_pythonnet)
+    assert desktop._pythonnet_download_blocked(error) is expected
+
+
+def test_bundled_pythonnet_marker_is_ignored_for_unrelated_load_errors(bundled_pythonnet, tmp_path):
+    marked = b"[ZoneTransfer]\r\nZoneId=3\r\n"
+    Path(f"{bundled_pythonnet}:Zone.Identifier").write_bytes(marked)
+    other_dll = tmp_path / "Python.Runtime.dll"
+    other_dll.touch()
+    Path(f"{other_dll}:Zone.Identifier").write_bytes(marked)
+    assert not desktop._pythonnet_download_blocked(_pythonnet_loader_error(other_dll))
+    assert not desktop._pythonnet_download_blocked(RuntimeError(str(bundled_pythonnet)))
 
 
 @pytest.mark.parametrize(

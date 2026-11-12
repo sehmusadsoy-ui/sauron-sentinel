@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 preview
+
+- Packaged the Windows desktop app as one executable plus notices. Standard PyInstaller startup extracts bundled support files to a temporary directory. This packaging change follows a reproduced 0.4.0 startup failure in which Windows marked the separately shipped `Python.Runtime.dll` as Internet-origin and .NET Framework refused to load it with error `0x80131515`.
+- Added a diagnostic category for the blocked bundled Python.NET assembly and a Windows packaging workflow check that exercises the frozen runtime from an Internet-marked copy of the newly built executable.
+
 ## 0.4.0 preview — 2026-11-06
 
 - Added first-use guidance and source-health explanations that distinguish unavailable, empty, partial, and healthy collection results.
