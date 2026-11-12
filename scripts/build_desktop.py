@@ -1,4 +1,4 @@
-"""Build and verify a clean Windows x64 portable folder, ZIP and hash manifest.
+"""Build and verify a Windows x64 portable ZIP with a single app executable.
 
 Install the pinned desktop and desktop-build extras first. This script performs
 no dependency installation and never collects repository or workstation data.
@@ -9,21 +9,27 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.metadata
+import io
 import json
+import ntpath
 import os
 import platform
 import shutil
+import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import tomllib
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 
 from desktop_assets import write_icon
 
 APP_NAME = "SauronSentinel"
+RELEASE_VERSION = "0.4.1"
 PUBLIC_REPOSITORY_URL = "https://github.com/sehmusadsoy-ui/sauron-sentinel"
+_EXCLUDED_DIRECTORIES = {".git", ".venv", "venv", "__pycache__", "screenshots"}
 _FORBIDDEN_SUFFIXES = {
     ".db",
     ".sqlite",
@@ -57,7 +63,13 @@ _RUNTIME_DISTRIBUTIONS = (
 
 
 def _redirected(path: Path) -> bool:
-    return path.is_symlink() or bool(getattr(path, "is_junction", lambda: False)())
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
 
 
 def checked_child(path: Path, parent: Path) -> Path:
@@ -103,6 +115,15 @@ def _private_needles(private_strings: tuple[str, ...]) -> tuple[bytes, ...]:
     )
 
 
+def _audit_bundle_path(path: PurePath, *, directory: bool = False) -> None:
+    if any(part.lower() in _EXCLUDED_DIRECTORIES for part in path.parts):
+        raise ValueError("Portable bundle contains an excluded development directory")
+    if not directory and (
+        path.suffix.lower() in _FORBIDDEN_SUFFIXES or path.name.lower().startswith(".env")
+    ):
+        raise ValueError("Portable bundle contains excluded local data")
+
+
 def audit_bundle(bundle: Path, private_strings: tuple[str, ...] = ()) -> list[Path]:
     """Fail rather than publish accidental local data, links or builder paths."""
     files = []
@@ -110,16 +131,11 @@ def audit_bundle(bundle: Path, private_strings: tuple[str, ...] = ()) -> list[Pa
     for path in sorted(bundle.rglob("*")):
         relative = path.relative_to(bundle)
         if _redirected(path):
-            raise ValueError("Portable bundle contains a symbolic link or junction")
-        if any(
-            part.lower() in {".git", ".venv", "venv", "__pycache__", "screenshots"}
-            for part in relative.parts
-        ):
-            raise ValueError("Portable bundle contains an excluded development directory")
-        if not path.is_file():
+            raise ValueError("Portable bundle contains a link or reparse point")
+        is_file = path.is_file()
+        _audit_bundle_path(relative, directory=not is_file)
+        if not is_file:
             continue
-        if path.suffix.lower() in _FORBIDDEN_SUFFIXES or path.name.lower().startswith(".env"):
-            raise ValueError("Portable bundle contains excluded local data")
         if needles:
             if relative.as_posix() == "README-TR.txt":
                 # The intentionally public repository URL can share text with a
@@ -144,10 +160,23 @@ def audit_bundle(bundle: Path, private_strings: tuple[str, ...] = ()) -> list[Pa
     return files
 
 
-def audit_frozen_archives(executable: Path, private_strings: tuple[str, ...]) -> dict[str, int]:
-    """Check decompressed Python entries as well as visible portable files."""
-    from PyInstaller.archive.readers import CArchiveReader
+def _audit_archive_path(name: str, *, directory: bool = False) -> None:
+    normalized = name.replace("\\", "/")
+    if directory:
+        normalized = normalized.removesuffix("/")
+    is_reserved = getattr(ntpath, "isreserved", None)
+    for part in normalized.split("/"):
+        if (
+            not part
+            or part.endswith((" ", "."))
+            or any(char in '<>:"|?*' or ord(char) < 32 for char in part)
+            or (is_reserved(part) if is_reserved else PureWindowsPath(part).is_reserved())
+        ):
+            raise ValueError("Frozen archive contains an unsafe Windows path")
+    _audit_bundle_path(PureWindowsPath(normalized), directory=directory)
 
+
+def _audit_frozen_entries(archive, private_strings: tuple[str, ...]) -> dict[str, int]:
     needles = _private_needles(private_strings)
     counts = {"frozen_entries": 0, "zip_members": 0}
 
@@ -155,22 +184,43 @@ def audit_frozen_archives(executable: Path, private_strings: tuple[str, ...]) ->
         if payload and any(needle in payload.lower() for needle in needles):
             raise ValueError("Frozen archive contains a private builder identifier")
 
-    archive = CArchiveReader(str(executable))
     for name, entry in archive.toc.items():
-        if entry[-1] == "z":
+        kind = entry[-1]
+        inspect(name.encode("utf-8"))
+        if kind == "n":  # PyInstaller archive symlink.
+            raise ValueError("Frozen archive contains a link or reparse point")
+        if kind == "z":  # PYZ archive of Python bytecode.
             nested = archive.open_embedded_archive(name)
             for module in nested.toc:
+                inspect(module.encode("utf-8"))
                 inspect(nested.extract(module, raw=True))
                 counts["frozen_entries"] += 1
-        else:
-            inspect(archive.extract(name))
-            counts["frozen_entries"] += 1
-    for path in executable.parent.rglob("*.zip"):
-        with zipfile.ZipFile(path) as zipped:
-            for name in zipped.namelist():
-                inspect(zipped.read(name))
-                counts["zip_members"] += 1
+            continue
+        if kind in {"b", "x", "Z"}:  # Extracted binary, data, or ZIP.
+            _audit_archive_path(name)
+        payload = archive.extract(name)
+        inspect(payload)
+        counts["frozen_entries"] += 1
+        if kind == "Z" or (kind == "x" and name.lower().endswith(".zip")):
+            # One-file builds store base_library.zip as a data entry.
+            with zipfile.ZipFile(io.BytesIO(payload)) as zipped:
+                for member in zipped.infolist():
+                    if stat.S_ISLNK(member.external_attr >> 16) or (
+                        member.external_attr & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                    ):
+                        raise ValueError("Frozen archive contains a link or reparse point")
+                    _audit_archive_path(member.orig_filename, directory=member.is_dir())
+                    inspect(member.orig_filename.encode("utf-8"))
+                    inspect(zipped.read(member))
+                    counts["zip_members"] += 1
     return counts
+
+
+def audit_frozen_archives(executable: Path, private_strings: tuple[str, ...]) -> dict[str, int]:
+    """Check embedded payloads after decompression, including Python archives."""
+    from PyInstaller.archive.readers import CArchiveReader
+
+    return _audit_frozen_entries(CArchiveReader(str(executable)), private_strings)
 
 
 def archive_bundle(bundle: Path, destination: Path) -> None:
@@ -185,7 +235,7 @@ def archive_bundle(bundle: Path, destination: Path) -> None:
 def copy_notices(repository: Path, bundle: Path) -> None:
     shutil.copyfile(repository / "LICENSE", bundle / "LICENSE.txt")
     notices = [
-        "Sauron Sentinel 0.4.0 - third-party components",
+        f"Sauron Sentinel {RELEASE_VERSION} - third-party components",
         "",
         "Python and the bundled libraries retain their respective licenses.",
         "Available license texts are included under third-party-licenses.",
@@ -216,7 +266,7 @@ def copy_notices(repository: Path, bundle: Path) -> None:
         shutil.copyfile(python_license, target)
     (bundle / "THIRD-PARTY-NOTICES.txt").write_text("\n".join(notices) + "\n", encoding="utf-8")
     (bundle / "README-TR.txt").write_text(
-        "SAURON SENTINEL 0.4.0\n\n"
+        f"SAURON SENTINEL {RELEASE_VERSION}\n\n"
         "1. ZIP dosyasının tamamını bir klasöre çıkar.\n"
         "2. SauronSentinel.exe dosyasını çift tıklayarak aç.\n"
         "3. İlk açılışta kaynakların erişim durumuna ve son kontrol zamanına bak.\n"
@@ -228,7 +278,7 @@ def copy_notices(repository: Path, bundle: Path) -> None:
         "   düzeyini ve kontrol aralığını seçebilirsin. Deneme bildirimi alarm değildir.\n"
         "   Windows bildirimleri gizleyebilir; bildirim kuyruğu teslim kanıtı değildir.\n"
         "6. Pencereyi kapattığında izleme ve bildirimler durur.\n\n"
-        "_internal klasörünü EXE dosyasının yanında tut. Python kurmak gerekmez.\n"
+        "Program tek bir EXE dosyası olarak gelir. Python kurmak gerekmez.\n"
         "Gereksinimler: Windows 10/11 x64, .NET Framework ve Microsoft Edge WebView2 Runtime.\n"
         "WebView2 eksikse resmi Microsoft WebView2 Runtime yükleyicisini kullan.\n"
         "Program normal kullanıcı olarak açılır; yönetici izni veya otomatik başlatma ayarı yapmaz.\n"
@@ -244,6 +294,38 @@ def copy_notices(repository: Path, bundle: Path) -> None:
         "Kaynak kod: https://github.com/sehmusadsoy-ui/sauron-sentinel\n",
         encoding="utf-8",
     )
+
+
+def freeze_executable(repository: Path, build: Path, staging: Path) -> Path:
+    bundle = checked_child(staging / APP_NAME, staging)
+    pyinstaller_work = checked_child(staging / "pyinstaller", staging)
+    command = [
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--workpath",
+        str(pyinstaller_work),
+        "--distpath",
+        str(bundle),
+        str(repository / "packaging" / "SauronSentinel.spec"),
+    ]
+    environment = os.environ.copy()
+    environment["PYINSTALLER_CONFIG_DIR"] = str(checked_child(build / "cache", build))
+    log_path = checked_child(build / "pyinstaller.log", build)
+    with log_path.open("w", encoding="utf-8") as log:
+        subprocess.run(
+            command,
+            cwd=repository,
+            env=environment,
+            check=True,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+    executable = checked_child(bundle / f"{APP_NAME}.exe", bundle)
+    if not executable.is_file() or list(bundle.iterdir()) != [executable]:
+        raise RuntimeError("PyInstaller did not produce the expected single executable")
+    return executable
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -270,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Install the pinned desktop and desktop-build extras before building")
     with (repository / "pyproject.toml").open("rb") as stream:
         version = tomllib.load(stream)["project"]["version"]
-    if version != "0.4.0":
+    if version != RELEASE_VERSION:
         parser.error(
             "Update packaging/version_info.txt and the portable notes before changing the release version"
         )
@@ -279,57 +361,54 @@ def main(argv: list[str] | None = None) -> int:
     output = checked_child(
         workspace / "outputs" / f"Sauron-Sentinel-{version}-Windows-x64", workspace / "outputs"
     )
-    bundle = checked_child(output / APP_NAME, output)
     build.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
-    pyinstaller_work = checked_child(build / "pyinstaller", build)
     write_icon(icon)
-    command = [
-        sys.executable,
-        "-m",
-        "PyInstaller",
-        "--noconfirm",
-        "--workpath",
-        str(pyinstaller_work),
-        "--distpath",
-        str(output),
-        str(repository / "packaging" / "SauronSentinel.spec"),
-    ]
-    environment = os.environ.copy()
-    environment["PYINSTALLER_CONFIG_DIR"] = str(checked_child(build / "cache", build))
-    with (build / "pyinstaller.log").open("w", encoding="utf-8") as log:
-        subprocess.run(
-            command,
-            cwd=repository,
-            env=environment,
-            check=True,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
-    executable = bundle / f"{APP_NAME}.exe"
-    if not executable.is_file():
-        raise RuntimeError("PyInstaller did not produce the expected executable")
-    report = build / "diagnostics.json"
-    report.unlink(missing_ok=True)
-    subprocess.run([str(executable), "--diagnose", str(report)], cwd=build, check=True, timeout=90)
-    diagnostics = json.loads(report.read_text(encoding="utf-8"))
-    if (
-        diagnostics.get("status") != "ok"
-        or diagnostics.get("frozen") is not True
-        or diagnostics.get("version") != version
-    ):
-        raise RuntimeError("Packaged executable self-check failed")
-    copy_notices(repository, bundle)
     private_strings = tuple(
         value
         for value in (str(workspace), str(Path.home()), os.environ.get("COMPUTERNAME", ""))
         if value
     )
-    files = audit_bundle(bundle, private_strings)
-    archive_audit = audit_frozen_archives(executable, private_strings)
     package_name = f"Sauron-Sentinel-{version}-Windows-x64.zip"
     archive = checked_child(output.parent / package_name, output.parent)
-    archive_bundle(bundle, archive)
+    with tempfile.TemporaryDirectory(prefix="portable-", dir=build) as directory:
+        staging = Path(directory)
+        executable = freeze_executable(repository, build, staging)
+        bundle = executable.parent
+        copy_notices(repository, bundle)
+        files = audit_bundle(bundle, private_strings)
+        archive_audit = audit_frozen_archives(executable, private_strings)
+        report = staging / "diagnostics.json"
+        build_report = checked_child(build / "diagnostics.json", build)
+        build_report.unlink(missing_ok=True)
+        try:
+            subprocess.run(
+                [str(executable), "--diagnose", str(report)], cwd=staging, check=True, timeout=90
+            )
+        finally:
+            if report.is_file():
+                shutil.copyfile(report, build_report)
+        diagnostics = json.loads(report.read_text(encoding="utf-8"))
+        if (
+            diagnostics.get("status") != "ok"
+            or diagnostics.get("frozen") is not True
+            or diagnostics.get("version") != version
+        ):
+            raise RuntimeError("Packaged executable self-check failed")
+
+        file_manifest = [
+            {
+                "path": (Path(APP_NAME) / path.relative_to(bundle)).as_posix(),
+                "bytes": path.stat().st_size,
+                "sha256": sha256(path),
+            }
+            for path in files
+        ]
+        staged_archive = staging / package_name
+        archive_bundle(bundle, staged_archive)
+        archive_hash = sha256(staged_archive)
+        archive_size = staged_archive.stat().st_size
+        staged_archive.replace(archive)
     manifest = {
         "schema_version": 1,
         "product": "Sauron Sentinel",
@@ -341,22 +420,17 @@ def main(argv: list[str] | None = None) -> int:
         "privacy_audit": {"files": len(files), **archive_audit},
         "archive": {
             "name": archive.name,
-            "bytes": archive.stat().st_size,
-            "sha256": sha256(archive),
+            "bytes": archive_size,
+            "sha256": archive_hash,
         },
-        "files": [
-            {
-                "path": (Path(APP_NAME) / path.relative_to(bundle)).as_posix(),
-                "bytes": path.stat().st_size,
-                "sha256": sha256(path),
-            }
-            for path in files
-        ],
+        "files": file_manifest,
     }
-    (output / "build-manifest.json").write_text(
+    checked_child(output / "build-manifest.json", output).write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    (output / "SHA256SUMS.txt").write_text(f"{sha256(archive)}  {archive.name}\n", encoding="ascii")
+    checked_child(output / "SHA256SUMS.txt", output).write_text(
+        f"{archive_hash}  {archive.name}\n", encoding="ascii"
+    )
     print(
         json.dumps(
             {"archive": archive.name, "version": version, "files": len(files), "diagnostics": "ok"},

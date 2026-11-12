@@ -41,6 +41,42 @@ jobs:
         run: |
           $artifactDirectory = (Resolve-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE '..\outputs')).Path
           "directory=$artifactDirectory" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Verify the packaged runtime with an Internet-origin marker
+        shell: pwsh
+        timeout-minutes: 3
+        env:
+          ARTIFACT_DIRECTORY: ${{ steps.artifacts.outputs.directory }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $testDirectory = Join-Path $env:RUNNER_TEMP ('sentinel-download-' + [Guid]::NewGuid().ToString('N'))
+          $archive = Join-Path $env:ARTIFACT_DIRECTORY "Sauron-Sentinel-${env:PACKAGE_VERSION}-Windows-x64.zip"
+          Expand-Archive -LiteralPath $archive -DestinationPath $testDirectory
+          $executable = Join-Path $testDirectory 'SauronSentinel\SauronSentinel.exe'
+          $marker = "[ZoneTransfer]`r`nZoneId=3`r`n"
+          Set-Content -LiteralPath $executable -Stream Zone.Identifier -Value $marker -NoNewline -Encoding ascii
+          if ((Get-Content -LiteralPath $executable -Stream Zone.Identifier -Raw) -cne $marker) {
+            throw 'Could not verify the Internet-origin marker before launch'
+          }
+          $reportPath = Join-Path $testDirectory 'report.json'
+          python -c "import subprocess, sys; subprocess.run([sys.argv[1], '--diagnose', sys.argv[2]], check=True, timeout=90)" $executable $reportPath
+          $diagnosticExit = $LASTEXITCODE
+          if ((Get-Content -LiteralPath $executable -Stream Zone.Identifier -Raw) -cne $marker) {
+            throw 'The Internet-origin marker changed during diagnostics'
+          }
+          if ($diagnosticExit -ne 0) {
+            throw 'Marked executable diagnostic command failed'
+          }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -AsHashtable
+          if ($report.status -cne 'ok' -or $report.version -cne $env:PACKAGE_VERSION -or
+              -not [object]::Equals($report.frozen, $true) -or
+              -not [object]::Equals($report.collected_windows_events, $false)) {
+            throw 'Marked executable diagnostics did not report a successful frozen runtime without event collection'
+          }
+          foreach ($check in 'resources', 'rules', 'desktop_libraries', 'instance_lock', 'loopback_http', 'sqlite', 'shutdown') {
+            if (-not [object]::Equals($report.checks[$check], $true)) {
+              throw "Marked executable failed the $check diagnostic check"
+            }
+          }
       - name: Upload package and verification manifests
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
