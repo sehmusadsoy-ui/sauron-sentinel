@@ -28,6 +28,7 @@ from .models import Event, ValidationError, format_timestamp, normalize
 from .preferences import SEVERITIES, default_preferences, validate_preferences
 from .rules import load_rules
 from .windows import collect_windows
+from .windows_exposure import run_exposure_audit
 
 
 def _json(value: Any) -> str:
@@ -660,6 +661,7 @@ class DashboardServer(ThreadingHTTPServer):
             raise ValidationError("Port must be an integer in 0..65535")
         self.monitor = monitor
         self.token = secrets.token_urlsafe(32)
+        self.audit_lock = threading.Lock()
         super().__init__(("127.0.0.1", port), DashboardHandler)
         self.url = f"http://127.0.0.1:{self.server_port}"
         self.hosts = {f"127.0.0.1:{self.server_port}", f"localhost:{self.server_port}"}
@@ -748,8 +750,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         read_match = re.fullmatch(r"/api/alerts/([a-f0-9]{64})/read", path)
         preferences_route = path == "/api/preferences"
         test_route = path == "/api/notifications/test"
+        exposure_route = path == "/api/system-exposure"
         if not (
-            path == "/api/scan" or review_match or read_match or preferences_route or test_route
+            path == "/api/scan"
+            or review_match
+            or read_match
+            or preferences_route
+            or test_route
+            or exposure_route
         ):
             self._json_reply(404, {"error": "not_found"})
             return
@@ -770,6 +778,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json_reply(400, {"error": "invalid_body"})
             return
         body = self.rfile.read(length) if length else b""
+        if exposure_route:
+            if body not in (b"", b"{}"):
+                self._json_reply(400, {"error": "invalid_body"})
+                return
+            if not self.server.audit_lock.acquire(blocking=False):
+                self._json_reply(409, {"error": "audit_busy"})
+                return
+            try:
+                # Bound runtime and do not leak PowerShell stderr or system paths.
+                result = run_exposure_audit()
+            except Exception:
+                result = {"status": "unavailable", "error": "audit_failed", "checks": []}
+            finally:
+                self.server.audit_lock.release()
+            self._json_reply(200, result)
+            return
         if review_match:
             try:
                 payload = json.loads(body.decode("utf-8"), object_pairs_hook=_unique_json_object)

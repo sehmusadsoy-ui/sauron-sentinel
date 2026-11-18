@@ -11,6 +11,7 @@ resources = [
     "defaults.toml",
     "demo.jsonl",
     "windows_collector.ps1",
+    "windows_exposure.ps1",
     "static/index.html",
     "static/app.js",
     "static/styles.css",

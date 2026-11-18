@@ -265,3 +265,80 @@ def test_serve_cleanup_and_browser_open(tmp_path, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         live.serve(tmp_path, open_browser=True)
     assert lifecycle == ["http://127.0.0.1:1234", "closed"]
+
+
+def test_exposure_route_requires_token_and_does_not_accept_get(dashboard, monkeypatch):
+    monkeypatch.setattr(
+        live, "run_exposure_audit", lambda: pytest.fail("untrusted request reached audit")
+    )
+    assert request(dashboard, "/api/system-exposure")[0] == 404
+    assert request(dashboard, "/api/system-exposure", method="POST", body=b"{}")[0] == 403
+    assert (
+        request(
+            dashboard,
+            "/api/system-exposure",
+            method="POST",
+            headers={"X-Sentinel-Token": dashboard.token, "Origin": "https://evil.example"},
+            body=b"{}",
+        )[0]
+        == 403
+    )
+    assert (
+        request(
+            dashboard,
+            "/api/system-exposure",
+            method="POST",
+            headers={"X-Sentinel-Token": dashboard.token},
+            body=b'{"execute":"cmd.exe"}',
+        )[0]
+        == 400
+    )
+
+
+def test_exposure_route_returns_local_snapshot_and_busy_status(dashboard, monkeypatch):
+    seen = []
+    output = {
+        "status": "completed",
+        "review_count": 1,
+        "unknown_count": 0,
+        "checks": [{"name": "Remote Desktop", "status": "REVIEW", "detail": "Enabled."}],
+    }
+    monkeypatch.setattr(live, "run_exposure_audit", lambda: seen.append(True) or output)
+    headers = {"X-Sentinel-Token": dashboard.token}
+    status, _, body = request(
+        dashboard, "/api/system-exposure", method="POST", headers=headers, body=b"{}"
+    )
+    assert status == 200
+    assert json.loads(body) == output
+    assert seen == [True]
+
+    dashboard.audit_lock.acquire()
+    try:
+        status, _, body = request(
+            dashboard, "/api/system-exposure", method="POST", headers=headers, body=b"{}"
+        )
+        assert status == 409 and json.loads(body) == {"error": "audit_busy"}
+        assert seen == [True]
+    finally:
+        dashboard.audit_lock.release()
+
+
+def test_exposure_runtime_error_is_generic_and_not_logged(dashboard, monkeypatch):
+    def fail():
+        raise RuntimeError("private account and password")
+
+    monkeypatch.setattr(live, "run_exposure_audit", fail)
+    status, _, body = request(
+        dashboard,
+        "/api/system-exposure",
+        method="POST",
+        headers={"X-Sentinel-Token": dashboard.token},
+        body=b"{}",
+    )
+    assert status == 200
+    assert json.loads(body) == {
+        "status": "unavailable",
+        "error": "audit_failed",
+        "checks": [],
+    }
+    assert b"password" not in body

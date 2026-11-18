@@ -77,7 +77,7 @@
     evidenceReturnId: null, reviewRevision: 0, reviewOverrides: new Map(), pendingReviews: new Map(),
     readRevision: 0, readOverrides: new Map(), pendingReads: new Map(),
     preferences: null, preferencesDirty: false, preferencesSaving: false, preferenceRevision: 0,
-    preferenceOverride: null, notificationTesting: false, connected: false,
+    preferenceOverride: null, notificationTesting: false, exposureRunning: false, connected: false,
     renderedEvents: "", renderedAlerts: "", renderedSources: "",
   };
   const numberFormat = new Intl.NumberFormat("tr-TR");
@@ -579,6 +579,7 @@
       if (state.preferenceOverride?.revision <= preferenceRevision) state.preferenceOverride = null;
       state.data = data;
       state.connected = true;
+      node("system-exposure-button").disabled = !token || state.exposureRunning;
       const summary = data.summary || {};
       node("events-total").textContent = count(summary.events_total);
       node("events-day").textContent = count(summary.events_24h);
@@ -602,6 +603,7 @@
       notice("error-notice", data.monitor?.last_error ? "Windows günlükleri okunurken bir sorun oluştu. Kaynak durumlarını kontrol et; otomatik izleme yeniden deneyecek." : "");
     } catch {
       state.connected = false;
+      node("system-exposure-button").disabled = true;
       updatePreferenceControls();
       node("connection-status").textContent = "Panel bağlantısı kesildi";
       node("connection-status").className = "connection-badge offline";
@@ -649,6 +651,80 @@
       node("scan-button").classList.remove("scanning");
       node("scan-button").removeAttribute("aria-busy");
       node("scan-button-label").textContent = "Şimdi tara";
+    }
+  }
+
+
+  const exposureLabels = {
+    "Firewall": "Güvenlik duvarı",
+    "Defender real-time protection": "Defender gerçek zamanlı koruma",
+    "Remote Desktop": "Uzak Masaüstü (RDP)",
+    "Remote Assistance": "Uzaktan Yardım",
+    "WinRM": "Windows Uzaktan Yönetim",
+    "RemoteRegistry": "Uzak Kayıt Defteri",
+    "Remote support software": "Uzaktan destek yazılımları",
+    "OpenSSH server": "OpenSSH sunucusu",
+    "SMBv1 server": "Eski SMBv1 protokolü",
+    "Sensitive TCP listeners": "Hassas TCP portları",
+    "System drive encryption": "Sistem diski şifreleme",
+    "Windows Update service": "Windows Update hizmeti",
+  };
+
+  function renderExposure(checks) {
+    const fragment = document.createDocumentFragment();
+    for (const check of checks) {
+      const stateName = { OK: "Kontrol edildi", REVIEW: "İnceleme gerekli", UNKNOWN: "Doğrulanamadı" }[check.status] || "Bilinmiyor";
+      const cssState = check.status === "OK" ? "ok" : check.status === "REVIEW" ? "error" : "pending";
+      const card = element("article", "source-card");
+      const content = element("div", "source-content");
+      const heading = element("div", "source-title-row");
+      heading.append(
+        element("h3", "source-title", exposureLabels[check.name] || check.name),
+        element("span", `source-state ${cssState}`, stateName),
+      );
+      content.append(heading, element("p", "source-count", check.detail));
+      card.append(element("span", "source-icon", "▤"), content);
+      fragment.append(card);
+    }
+    node("system-exposure-results").replaceChildren(fragment);
+  }
+
+  async function runExposure() {
+    if (state.exposureRunning || !state.connected || !token) return;
+    const button = node("system-exposure-button");
+    state.exposureRunning = true;
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "Denetleniyor…";
+    notice("system-exposure-notice", "Windows ayarları salt okunur denetleniyor. Sonuçlar yalnızca bu oturumda görüntülenecek.");
+    try {
+      const result = await api("/api/system-exposure", {
+        method: "POST",
+        headers: { "X-Sentinel-Token": token, "Content-Type": "application/json" },
+        body: "{}",
+      }, 30000);
+      if (result.status !== "completed" || !Array.isArray(result.checks)) {
+        const reason = {
+          not_windows: "Sistem denetimi yalnızca Windows üzerinde yapılabilir.",
+          powershell_unavailable: "Windows PowerShell bulunamadı.",
+          timeout: "Denetim zaman aşımına uğradı.",
+          audit_failed: "Denetim tamamlanamadı. Windows erişim izinlerini ve Sentinel sürümünü kontrol et.",
+        }[result.error] || "Denetim sonuçları alınamadı.";
+        notice("system-exposure-notice", reason);
+        return;
+      }
+      renderExposure(result.checks);
+      const review = Number(result.review_count) || 0;
+      const unknown = Number(result.unknown_count) || 0;
+      notice("system-exposure-notice", `${result.checks.length} yapılandırma kontrol edildi. ${review} inceleme gerekli, ${unknown} doğrulanamadı. Kontrollerin geçmesi bilgisayarın ele geçirilmediğini kanıtlamaz.`);
+    } catch (error) {
+      const message = error.code === "audit_busy" ? "Bir sistem denetimi zaten devam ediyor." : "Denetim başlatılamadı. Bağlantıyı ve Sentinel durumunu kontrol et.";
+      notice("system-exposure-notice", message);
+    } finally {
+      state.exposureRunning = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = "Sistem ayarlarını denetle";
+      button.disabled = !state.connected || !token;
     }
   }
 
@@ -908,6 +984,7 @@
   }
 
   node("scan-button").addEventListener("click", scan);
+  node("system-exposure-button").addEventListener("click", runExposure);
   node("preferences-form").addEventListener("submit", savePreferences);
   node("notifications-enabled").addEventListener("change", preferencesChanged);
   node("minimum-severity").addEventListener("change", preferencesChanged);

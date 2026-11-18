@@ -14,6 +14,7 @@ from sauron_sentinel.live import DashboardServer, EventStore, LiveMonitor
 def main() -> None:
     package = resources.files("sauron_sentinel")
     assert package.joinpath("windows_collector.ps1").is_file()
+    assert package.joinpath("windows_exposure.ps1").is_file()
     for name in ("index.html", "app.js", "styles.css"):
         assert package.joinpath("static", name).is_file()
 

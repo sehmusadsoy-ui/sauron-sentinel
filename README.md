@@ -61,6 +61,16 @@ Healthy polls use a 120-second overlap. If any source is unavailable or fails, m
 
 Windows may restrict Security or Defender log access for the current account. Missing audit configuration, disabled channels, and an empty selected-event window can also affect results. Sentinel reports these conditions; it does not elevate itself or alter logging settings. See [Windows monitoring](docs/windows-monitoring.md).
 
+## Opt-in Windows system security review
+
+The **Sistem Güvenliği** panel provides an on-demand read-only snapshot of selected
+Defender, firewall, remote-access, listener, and encryption settings. It requires
+an explicit button click; no changes, exports, administrator elevation, or
+background scans are performed. Results can be `OK`, `REVIEW` or `UNKNOWN`;
+`OK` never proves the machine is free of malware or remote compromise. See the
+[Windows system audit guide](docs/windows-system-audit.md) for limits and the
+physical Windows acceptance tests required before shipping this feature.
+
 ## Review, preferences, and notifications
 
 Open an alert to read its evidence, matching conditions, possible benign causes, and safe checks. The explanation catalog covers all ten bundled rules; RF and motion examples remain offline schema demonstrations. An unknown rule receives cautious generic guidance. Explanations do not change raw alert or evidence records.
