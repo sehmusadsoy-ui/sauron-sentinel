@@ -34,7 +34,7 @@ desktop = [
 ]
 desktop-build = [
   "pyinstaller==6.22.3; sys_platform == 'win32'",
-  "pyinstaller-hooks-contrib==2026.9; sys_platform == 'win32'",
+  "pyinstaller-hooks-contrib==2026.10; sys_platform == 'win32'",
 ]
 
 [project.scripts]
