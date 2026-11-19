@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Windows x64, one-directory build; only explicit application resources ship."""
+"""Windows x64, single-executable build with explicit application resources."""
 
 from pathlib import Path
 
@@ -52,8 +52,8 @@ archive = PYZ(analysis.pure)
 executable = EXE(
     archive,
     analysis.scripts,
-    [],
-    exclude_binaries=True,
+    analysis.binaries,
+    analysis.datas,
     name="SauronSentinel",
     debug=False,
     bootloader_ignore_signals=False,
@@ -65,13 +65,4 @@ executable = EXE(
     version=str(repository / "packaging" / "version_info.txt"),
     uac_admin=False,
     uac_uiaccess=False,
-    contents_directory="_internal",
-)
-bundle = COLLECT(
-    executable,
-    analysis.binaries,
-    analysis.datas,
-    strip=False,
-    upx=False,
-    name="SauronSentinel",
 )

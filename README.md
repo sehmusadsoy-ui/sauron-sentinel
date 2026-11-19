@@ -8,7 +8,7 @@
 
 Sauron Sentinel is a local Windows security-monitoring application with a Turkish desktop window, a read-only Windows Event Log collector, persistent SQLite storage, and an explainable rule engine. It shows real observations from the current computer, source availability, and alerts backed by event evidence. The same dashboard is also available through the local browser/CLI mode.
 
-**Version 0.4.0 is an early usability preview.** It adds first-use source guidance, explanations for all ten bundled heuristics, per-alert review notes, persistent preferences, and optional Windows desktop notifications. See the [validation record](docs/validation-v0.4.md) for the read-only checkpoint and the native/manual checks it does not establish. Published assets and their actual verification status belong to the release record.
+**Version 0.4.1 updates the Windows portable package for downloaded copies.** The desktop preview includes first-use source guidance, explanations for all ten bundled heuristics, per-alert review notes, persistent preferences, and optional Windows desktop notifications. The earlier read-only checkpoint is documented separately. [0.4.0 validation record](docs/validation-v0.4.md)
 
 The portable ZIP includes Python and application dependencies, so the target computer does not need a Python installation. The desktop window uses an existing Microsoft WebView2 Runtime. The core monitoring/CLI runtime still uses the Python standard library; desktop support is an optional dependency group.
 
@@ -16,15 +16,15 @@ RF Canvas, CSI Radar, and LabMate remain **future integration targets**. No Flip
 
 ## Portable Windows app
 
-1. Obtain the complete `Sauron-Sentinel-0.4.0-Windows-x64.zip` preview archive when available from [release assets](https://github.com/sehmusadsoy-ui/sauron-sentinel/releases).
+1. Obtain the complete `Sauron-Sentinel-0.4.1-Windows-x64.zip` preview archive when available. [Release assets](https://github.com/sehmusadsoy-ui/sauron-sentinel/releases)
 2. Extract the whole ZIP to a folder you can access.
 3. Open the extracted `SauronSentinel` folder and double-click **`SauronSentinel.exe`**.
 
-Keep the application files together; moving only the executable will break the portable edition. No installer, administrator prompt, autostart registration, or desktop shortcut is created. Close the window to stop its monitoring and local server.
+The extracted folder contains a single application executable and the accompanying usage and license notices. The executable unpacks its bundled support files into a temporary directory at launch. No installer, administrator prompt, autostart registration, or desktop shortcut is created. Close the window to stop its monitoring and local server.
 
-Requires Windows 10/11 x64 and the [Microsoft WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). Sentinel does not automatically download or install that runtime. The executable is unsigned, so Windows may display an unknown-publisher warning. Use the published checksum to compare your download; a checksum does not replace a publisher signature.
+Requires Windows 10/11 x64 with .NET Framework and the existing Microsoft Edge WebView2 Runtime. Sentinel leaves WebView2 installation to the user or administrator. The executable is unsigned, so Windows or organizational policy may warn or block it. Use the published checksum to compare your download. [Microsoft WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
 
-Desktop data is stored separately under `%LOCALAPPDATA%\SauronSentinel`, outside the extracted application folder. The ZIP contains application code/resources, not your monitoring history. Existing source-mode data in `sentinel-data` is left in place and is not imported automatically. See the [desktop guide](docs/desktop.md) for requirements, data locations, and building the portable edition.
+Desktop data is stored separately under `%LOCALAPPDATA%\SauronSentinel`. Upgrading from the 0.4.0 portable build reuses this history. Existing source-mode data in `sentinel-data` is left in place and is not imported automatically. [Desktop guide](docs/desktop.md)
 
 ## Run from source on Windows
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Sauron Sentinel v0.4.0 is an early usability preview with three entry paths: a portable Windows desktop window, persistent local browser monitoring, and a strict JSONL batch-analysis CLI. All share the normalized event contract and declarative rule engine. None acquires radio data or authenticates external sensors. The [validation record](validation-v0.4.md) states the limits of the recorded checkpoint.
+Sauron Sentinel v0.4.1 includes a portable Windows desktop app, persistent local browser monitoring, and a strict JSONL batch-analysis CLI. All share the normalized event contract and declarative rule engine. None acquires radio data or authenticates external sensors. The earlier read-only checkpoint covers v0.4.0. [Validation record](validation-v0.4.md)
 
 ## Desktop lifecycle
 

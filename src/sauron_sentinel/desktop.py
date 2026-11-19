@@ -19,6 +19,8 @@ import sys
 import tempfile
 import threading
 import traceback
+from configparser import ConfigParser
+from configparser import Error as ConfigParserError
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -201,6 +203,9 @@ def _show_message(message: str, *, error: bool = True) -> None:
         print(f"Sauron Sentinel: {message}", file=sys.stderr)
 
 
+_PYTHONNET_DOWNLOAD_BLOCKED = "pythonnet_download_blocked"
+_PYTHONNET_LOAD_FAILURE = "Failed to resolve Python.Runtime.Loader.Initialize from "
+
 _STARTUP_MESSAGES = {
     "components": (
         "Masaüstü bileşenleri yüklenemedi. Windows uygulama paketini eksiksiz "
@@ -231,6 +236,11 @@ _STARTUP_MESSAGES = {
         "Uygulamanın kural ayarları okunamadı veya geçersiz. Windows uygulama "
         "paketini eksiksiz çıkarıp yeniden deneyin."
     ),
+    _PYTHONNET_DOWNLOAD_BLOCKED: (
+        "Uygulamanın .NET bileşeni yüklenemedi. Windows, paketteki Python.Runtime.dll "
+        "dosyasını internetten indirilmiş olarak işaretlemiş. Güncel resmî paketi "
+        "veya daha önce doğrulanmış yerel uygulama kopyasını kullanın."
+    ),
     "webview2_missing": (
         "Microsoft'un denetimi kullanılabilir bir WebView2 bulamadı. "
         "Microsoft Edge WebView2 Runtime'ı Microsoft'un resmî sitesinden "
@@ -246,6 +256,49 @@ _STARTUP_MESSAGES = {
         "sorun sürerse yerel açılış hata kaydıyla destek isteyin."
     ),
 }
+
+
+def _pythonnet_download_blocked(error: BaseException) -> bool:
+    """Check the bundled DLL's download marker after a matching loader failure."""
+    bundle = getattr(sys, "_MEIPASS", None)
+    if platform.system() != "Windows" or not getattr(sys, "frozen", False) or not bundle:
+        return False
+    dll = Path(bundle) / "pythonnet" / "runtime" / "Python.Runtime.dll"
+    if not dll.is_absolute():
+        return False
+
+    # pywebview retries the import while handling the original loader failure.
+    current: BaseException | None = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        message = current.args[0] if len(current.args) == 1 else None
+        if (
+            isinstance(current, RuntimeError)
+            and isinstance(message, str)
+            and message.startswith(_PYTHONNET_LOAD_FAILURE)
+            and Path(message.removeprefix(_PYTHONNET_LOAD_FAILURE)) == dll
+        ):
+            break
+        current = current.__cause__ or (
+            None if current.__suppress_context__ else current.__context__
+        )
+    else:
+        return False
+
+    # Read only the fixed bundled path and bound the metadata size. The stream
+    # may also contain source URLs, which must stay out of the diagnosis.
+    marker_limit = 4096
+    try:
+        with Path(f"{dll}:Zone.Identifier").open("rb") as stream:
+            marker = stream.read(marker_limit + 1)
+        if len(marker) > marker_limit:
+            return False
+        zone = ConfigParser(default_section="", interpolation=None)
+        zone.read_string(marker.decode("utf-8-sig", errors="replace"))
+        return zone.get("ZoneTransfer", "ZoneId", fallback=None) in ("3", "4")
+    except (OSError, ConfigParserError):
+        return False
 
 
 def _classify_startup_error(
@@ -468,7 +521,12 @@ def _diagnose(output: Path) -> int:
             raise RuntimeError("Missing rules")
         report["checks"]["rules"] = True
         if getattr(sys, "frozen", False) and platform.system() == "Windows":
-            _verify_desktop_libraries()
+            try:
+                _verify_desktop_libraries()
+            except Exception as exc:
+                if _pythonnet_download_blocked(exc):
+                    report["error"] = _PYTHONNET_DOWNLOAD_BLOCKED
+                raise
             report["checks"]["desktop_libraries"] = True
         with tempfile.TemporaryDirectory(prefix="sauron-desktop-diagnose-") as directory:
             data_dir = Path(directory)
@@ -521,7 +579,7 @@ def _diagnose(output: Path) -> int:
             report["checks"]["shutdown"] = True
         report["status"] = "ok"
     except Exception:
-        report["error"] = "diagnostics_failed"
+        report.setdefault("error", "diagnostics_failed")
     try:
         output = Path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -559,8 +617,11 @@ def main(argv: list[str] | None = None) -> int:
     except (Exception, KeyboardInterrupt, SystemExit) as exc:
         _record_startup_error(runtime)
         stage = getattr(runtime, "startup_stage", stage)
-        runtime_status = _webview2_runtime_status() if stage == "window" else "unknown"
-        category = _classify_startup_error(exc, stage=stage, webview2_status=runtime_status)
+        if stage in ("components", "window") and _pythonnet_download_blocked(exc):
+            category = _PYTHONNET_DOWNLOAD_BLOCKED
+        else:
+            runtime_status = _webview2_runtime_status() if stage == "window" else "unknown"
+            category = _classify_startup_error(exc, stage=stage, webview2_status=runtime_status)
         _show_message(_STARTUP_MESSAGES[category])
         return 1
     finally:

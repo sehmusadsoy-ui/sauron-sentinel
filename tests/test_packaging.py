@@ -1,11 +1,14 @@
 """Portable packaging must not collect local data or escape its build targets."""
 
 import importlib.util
+import io
+import stat
 import struct
 import sys
 import tomllib
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,7 +33,7 @@ def builder(monkeypatch):
 def test_release_versions_match_runtime_resources_and_portable_notes(builder, tmp_path):
     repository = SCRIPTS.parent
     metadata = tomllib.loads((repository / "pyproject.toml").read_text(encoding="utf-8"))
-    assert metadata["project"]["version"] == __version__ == "0.4.0"
+    assert metadata["project"]["version"] == __version__ == builder.RELEASE_VERSION == "0.4.1"
     resource = (repository / "packaging" / "version_info.txt").read_text(encoding="utf-8")
     numeric_version = tuple(int(part) for part in __version__.split(".")) + (0,)
     assert f"filevers={numeric_version}" in resource
@@ -103,17 +106,74 @@ def test_public_repository_reference_does_not_mask_other_private_text(builder, t
 
 def test_archive_contains_only_the_named_portable_folder(builder, tmp_path):
     bundle = tmp_path / "SauronSentinel"
-    (bundle / "_internal").mkdir(parents=True)
+    bundle.mkdir()
     (bundle / "SauronSentinel.exe").write_bytes(b"app")
-    (bundle / "_internal" / "resource.txt").write_bytes(b"resource")
+    (bundle / "README-TR.txt").write_bytes(b"readme")
     (tmp_path / "private.db").write_bytes(b"not part of bundle")
     archive = tmp_path / "portable.zip"
     builder.archive_bundle(bundle, archive)
     with zipfile.ZipFile(archive) as reader:
         assert set(reader.namelist()) == {
             "SauronSentinel/SauronSentinel.exe",
-            "SauronSentinel/_internal/resource.txt",
+            "SauronSentinel/README-TR.txt",
         }
+
+
+def _archive_with_library_zip(member, payload, *, kind="b"):
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_DEFLATED) as library:
+        library.writestr(member, payload)
+    entries = {"base_library.zip": zipped.getvalue()}
+    return SimpleNamespace(toc={"base_library.zip": (kind,)}, extract=entries.__getitem__)
+
+
+@pytest.mark.parametrize("kind", ["b", "x", "Z"])
+def test_frozen_audit_checks_decompressed_library_zip(builder, kind):
+    private = "C:/private-builder/profile"
+    clean = _archive_with_library_zip("encodings/__init__.pyc", b"bytecode", kind=kind)
+    assert builder._audit_frozen_entries(clean, (private,)) == {
+        "frozen_entries": 1,
+        "zip_members": 1,
+    }
+    embedded = _archive_with_library_zip(
+        "encodings/__init__.pyc", private.encode("utf-16-le"), kind=kind
+    )
+    assert private.encode("utf-16-le") not in embedded.extract("base_library.zip")
+    with pytest.raises(ValueError, match="private builder"):
+        builder._audit_frozen_entries(embedded, (private,))
+
+
+def test_frozen_audit_requires_scanned_base_library(builder):
+    unscanned = _archive_with_library_zip("encodings/__init__.pyc", b"bytecode", kind="s")
+    with pytest.raises(ValueError, match="missing an audited base_library.zip"):
+        builder._audit_frozen_entries(unscanned, ())
+
+
+@pytest.mark.parametrize(
+    "name", ["../private.pyc", r"data\..\private.pyc", "file.pyc:stream", "NUL.pyc"]
+)
+def test_frozen_audit_rejects_unsafe_archive_paths(builder, name):
+    embedded = _archive_with_library_zip(name, b"bytecode")
+    with pytest.raises(ValueError, match="unsafe Windows path"):
+        builder._audit_frozen_entries(embedded, ())
+
+
+def test_frozen_audit_rejects_private_names_and_links(builder):
+    private = "private-builder"
+    embedded = _archive_with_library_zip(f"{private}/example.pyc", b"bytecode")
+    with pytest.raises(ValueError, match="private builder"):
+        builder._audit_frozen_entries(embedded, (private,))
+    symlink = zipfile.ZipInfo("encodings/link.pyc")
+    symlink.external_attr = stat.S_IFLNK << 16
+    with pytest.raises(ValueError, match="link or reparse point"):
+        builder._audit_frozen_entries(_archive_with_library_zip(symlink, b"target"), ())
+    reparse = zipfile.ZipInfo("encodings/link.pyc")
+    reparse.external_attr = stat.FILE_ATTRIBUTE_REPARSE_POINT
+    with pytest.raises(ValueError, match="link or reparse point"):
+        builder._audit_frozen_entries(_archive_with_library_zip(reparse, b"target"), ())
+    carchive_symlink = SimpleNamespace(toc={"runtime/link.dll": ("n",)})
+    with pytest.raises(ValueError, match="link or reparse point"):
+        builder._audit_frozen_entries(carchive_symlink, ())
 
 
 def test_build_target_must_be_strict_child(builder, tmp_path):

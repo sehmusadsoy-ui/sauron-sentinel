@@ -1,15 +1,15 @@
 # Windows desktop edition
 
-Version 0.4.0 is an early usability preview adding first-use health guidance, rule explanations, per-alert reviews, persistent preferences, and opt-in Windows notification attempts. It shares the Windows collector, normalization, rule engine, and SQLite model with CLI monitoring. RF Canvas, CSI Radar, and LabMate remain planned only. See the [validation record](validation-v0.4.md) for actual read-only Windows evidence and the native/manual and clean-machine checks not established by that checkpoint.
+Version 0.4.1 updates the portable packaging introduced in the early desktop preview. The desktop includes first-use health guidance, rule explanations, per-alert reviews, persistent preferences, and opt-in Windows notification attempts. It shares the Windows collector, normalization, rule engine, and SQLite model with CLI monitoring. RF Canvas, CSI Radar, and LabMate remain planned only. The historical 0.4.0 checkpoint records read-only Windows collection and the scope of the native, manual, and clean-machine checks. [0.4.0 validation record](validation-v0.4.md)
 
 ## Run the portable ZIP
 
-1. Obtain the complete `Sauron-Sentinel-0.4.0-Windows-x64.zip` preview archive when available. Published assets and their actual verification status appear under [releases](https://github.com/sehmusadsoy-ui/sauron-sentinel/releases).
+1. Obtain the complete `Sauron-Sentinel-0.4.1-Windows-x64.zip` preview archive when available. Published assets and their verification status appear in the release record. [Releases](https://github.com/sehmusadsoy-ui/sauron-sentinel/releases)
 2. Extract the complete archive into a writable location.
 3. Open `SauronSentinel` and double-click `SauronSentinel.exe`.
 4. Close the window when finished. Its monitor and local HTTP server stop with the application.
 
-The portable folder includes the executable and its support files. Keep them together. The target computer does not need Python, pip, a virtual environment, or the source repository. This is a folder-based portable build, not a single self-contained executable or an installer.
+The portable folder contains one `SauronSentinel.exe`, Turkish first-use instructions, and license notices. The executable bundles Python and application dependencies. PyInstaller unpacks the bundled support files into a temporary directory during launch. [PyInstaller documentation](https://www.pyinstaller.org/en/stable/operating-mode.html#how-the-one-file-program-works)
 
 No autostart entry, service, desktop shortcut, or administrator prompt is created. Windows permissions still determine which event channels can be read. An inaccessible Security log remains visibly unavailable.
 
@@ -32,12 +32,13 @@ The notification icon exists only for the open window. It does not keep Sentinel
 ## Requirements
 
 - Windows 10/11 x64.
-- An existing Microsoft Edge WebView2 Runtime and the Windows .NET facilities needed by the desktop host.
+- Windows .NET Framework and an existing Microsoft Edge WebView2 Runtime.
+- A writable temporary directory for the bundled runtime files.
 - A writable per-user Local AppData directory.
 
 Sentinel explicitly uses the EdgeChromium renderer and does not download or install WebView2 automatically. If the runtime is missing, obtain it from [Microsoft's WebView2 page](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) through your normal software-management process. A normal Edge browser installation is not a substitute for the WebView2 Runtime requirement. Microsoft's [distribution documentation](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution) explains that distinction.
 
-The distributed executable is unsigned. Windows may identify its publisher as unknown. The release checksum allows comparison with the published archive; it is not a signing certificate or an independent trust guarantee.
+The distributed executable is unsigned. Windows reputation checks and organizational application policies can warn or block it. The release checksum allows comparison with the published archive. [Microsoft SmartScreen documentation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
 
 ## Local data and upgrades
 
@@ -47,7 +48,7 @@ Desktop state belongs to the current user under:
 %LOCALAPPDATA%\SauronSentinel
 ```
 
-The database is separate from the portable application files. Replacing or moving the extracted application folder does not intentionally copy your telemetry into the package. The build starts from application resources and does not include live databases, captures, or personal run directories.
+The database is separate from the portable application files. Upgrading from the 0.4.0 portable build reuses this per-user history. The build uses application resources and excludes live databases, captures, and personal run directories.
 
 Existing browser/source-mode data under a repository's `sentinel-data` is not migrated or imported automatically. Desktop mode begins with its own per-user store. Preserve any older source-mode history separately when needed.
 
@@ -58,6 +59,17 @@ The `sentinel.db` file holds monitoring history, review notes, preferences, unre
 If startup fails, `startup-error.log` records the last exception locally after monitoring is stopped. It can contain local filesystem paths; review or redact it before sharing. Logs are excluded from portable packages and are never uploaded automatically.
 
 Close Sentinel before backing up, moving, or removing its data directory. The store contains sensitive plaintext event context and evidence; deleting the application folder alone does not remove this per-user history. Normal retention remains 20,000 events and 2,000 alerts.
+
+## Diagnose a portable copy
+
+From PowerShell in the extracted `SauronSentinel` folder, run the diagnostic to write or replace `diagnostic.json` in that folder.
+
+```powershell
+$process = Start-Process -FilePath .\SauronSentinel.exe -ArgumentList '--diagnose diagnostic.json' -WorkingDirectory (Get-Location).Path -Wait -PassThru
+$process.ExitCode
+```
+
+A successful diagnostic returns exit code `0` and reports `status: ok`. It loads the bundled .NET/WebView2 libraries and checks application resources, rules, SQLite, loopback HTTP, instance locking, and shutdown using temporary data. It runs without a desktop window, the normal history database, or Windows event collection. A Windows policy block can prevent the executable from writing a report.
 
 ## Local server and shutdown
 
@@ -89,10 +101,10 @@ python -m pip install -e ".[desktop,desktop-build]"
 python scripts/build_desktop.py
 ```
 
-The fixed PyInstaller specification is `packaging/SauronSentinel.spec`. The build produces a windowed folder-based application, a portable ZIP, checksum information, and a build manifest under the workspace's `outputs` directory, with versioned working files under `work/desktop-build-0.4.0`. It includes Turkish first-use notes, licenses, and third-party notices, without live monitoring history. Keep the bundled vendor native assemblies for win-arm64, win-x64, and win-x86 intact; the host loads its required assemblies from this layout.
+The PyInstaller specification is `packaging/SauronSentinel.spec`. The build produces a portable ZIP with a windowed single-executable application and its notices, plus checksum information and a build manifest under the workspace's `outputs` directory. Build logs and diagnostics are written under `work/desktop-build-0.4.1`. The executable bundles the vendor assemblies used by the desktop host.
 
 The build configuration pins pywebview 6.2.1, pythonnet 3.2.1, PyInstaller 6.22.3, and pyinstaller-hooks-contrib 2026.9 in `pyproject.toml`; dependency imports were checked with Python 3.14.8 during earlier desktop validation. Each candidate still needs its own frozen-package self-check, content/privacy audit, and recorded checksum. A native window check and clean-machine installation are separate from that self-check.
 
-The manually triggered **Windows portable** GitHub Actions workflow builds the same artifact on a Windows runner and uploads only the portable package and its manifests. It does not launch the Windows collector against the maintainer's computer or publish a release automatically. A real desktop launch/close check is separate from a successful build.
+The manually triggered **Windows portable** GitHub Actions workflow builds the same artifact on a Windows runner. Before uploading the ZIP and manifests, the workflow extracts a temporary copy of the ZIP, applies a Windows Internet-origin marker to the extracted executable, runs headless diagnostics, and checks that the marker remains intact. This covers the packaged runtime and desktop library load under the runner's Windows policy. Launching from Explorer, interacting with SmartScreen, and opening and closing a native window each require separate verification.
 
 PyInstaller bundles Python and application dependencies, while WebView2 remains an existing system runtime. The [pywebview freezing guide](https://pywebview.flowrl.com/guide/freezing.html) describes its PyInstaller integration. Neither byte-for-byte reproducible builds nor code signing is claimed.
